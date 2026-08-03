@@ -2,7 +2,7 @@
 
 ![status](https://img.shields.io/badge/status-work%20in%20progress-orange)
 
-<img src="icon.svg" width="96" height="96" alt="haos-ovos-addons icon">
+<img src="logo.png" width="96" height="96" alt="OpenVoiceOS logo">
 
 > 🚧 **Work in progress.** Nothing here has been tested in production yet. Use at your own risk.
 
@@ -48,3 +48,5 @@ full-skills add-on.
 ![license](https://img.shields.io/badge/license-Apache--2.0-blue)
 
 Licensed under the [Apache License 2.0](LICENSE), matching OpenVoiceOS's own project license.
+
+The OpenVoiceOS logo is used with attribution to the [OpenVoiceOS project](https://openvoiceos.org); this project is not officially affiliated with or endorsed by OpenVoiceOS.
