@@ -36,5 +36,7 @@ with `TypeError: TtsVoice.__init__() missing 1 required positional argument: 've
 
 - `plugin_config` is a single JSON text field, not a per-plugin form — you need to know the
   plugin's own config keys.
-- Verified working on a real HAOS Supervisor as of v0.0.3 (build succeeds, add-on starts,
-  reaches `INFO:root:Ready`). Not yet verified end-to-end inside an actual Assist pipeline.
+- Verified end-to-end on a real HAOS Supervisor as of v0.0.6: builds, starts cleanly, sends
+  discovery, appears under Settings → Devices & services → Discovered, and is selectable as a
+  TTS engine in an Assist pipeline once confirmed. Not yet verified that synthesized speech
+  actually plays correctly through a satellite/pipeline run.
