@@ -13,7 +13,7 @@ FROM ghcr.io/home-assistant/base:latest
 # compatible wikipedia question-solver package is found.
 RUN apk add --no-cache python3 py3-pip jq \
  && pip install --no-cache-dir --break-system-packages \
-      ovos-persona-server ovos-workshop ovos-ddg-solver-plugin ovos-solver-failure-plugin
+      ovos-persona-server ovos-workshop uvicorn ovos-ddg-solver-plugin ovos-solver-failure-plugin
 
 COPY run.sh /
 RUN chmod a+x /run.sh

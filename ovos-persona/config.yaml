@@ -1,5 +1,5 @@
 name: "OVOS Persona"
-version: "0.0.4"
+version: "0.0.5"
 slug: "ovos_persona"
 description: "Ollama-compatible OVOS persona server, usable as a Home Assistant conversation agent"
 url: "https://github.com/andlo/haos-ovos-addons/tree/master/ovos-persona"
