@@ -35,3 +35,16 @@ architecture and decisions behind the project.
 
 - [ovos-skill-browser](https://github.com/andlo/ovos-skill-browser) — web-based skill store, runs outside HAOS
 - [haos-ovos-skills](https://github.com/andlo/haos-ovos-skills) — deferred: skills directly inside a single HAOS container
+
+## About
+
+Part of the **HA-OVOS** project: making it easy for a Home Assistant OS user to discover and
+use OpenVoiceOS, through interfaces that feel native to HAOS. This repo builds the actual
+Supervisor add-ons — see the other repos for the web-based skill browser and the deferred
+full-skills add-on.
+
+## License
+
+![license](https://img.shields.io/badge/license-Apache--2.0-blue)
+
+Licensed under the [Apache License 2.0](LICENSE), matching OpenVoiceOS's own project license.
