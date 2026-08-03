@@ -21,7 +21,8 @@ jq -n \
 # Tell Home Assistant this is a Wyoming service once the port is up
 # (same pattern as the official Piper add-on's discovery script).
 (
-  bash -c "until echo '{ \"type\": \"describe\" }' > /dev/tcp/localhost/10200; do sleep 0.5; done" > /dev/null 2>&1 || true
+  until (exec 3<>/dev/tcp/localhost/10200) 2>/dev/null; do sleep 0.5; done
+  exec 3>&- 3<&- 2>/dev/null || true
   config=$(bashio::var.json uri "tcp://$(hostname):10200")
   if bashio::discovery "wyoming" "${config}" > /dev/null; then
     bashio::log.info "Successfully sent discovery information to Home Assistant."

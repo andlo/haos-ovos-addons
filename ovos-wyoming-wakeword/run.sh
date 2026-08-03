@@ -15,7 +15,8 @@ mkdir -p "${CONF_DIR}"
 jq -n --argjson hw "$HOTWORDS" '{hotwords: $hw}' > "${CONF_DIR}/mycroft.conf"
 
 (
-  bash -c "until echo '{ \"type\": \"describe\" }' > /dev/tcp/localhost/10400; do sleep 0.5; done" > /dev/null 2>&1 || true
+  until (exec 3<>/dev/tcp/localhost/10400) 2>/dev/null; do sleep 0.5; done
+  exec 3>&- 3<&- 2>/dev/null || true
   config=$(bashio::var.json uri "tcp://$(hostname):10400")
   if bashio::discovery "wyoming" "${config}" > /dev/null; then
     bashio::log.info "Successfully sent discovery information to Home Assistant."
