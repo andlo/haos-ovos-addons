@@ -1,0 +1,13 @@
+configuration:
+  hotwords_config:
+    name: "Wake words"
+    description: "JSON object matching mycroft.conf's \"hotwords\" section — one or more wake words, all become available via Wyoming"
+  extra_pip_packages:
+    name: "Extra pip packages"
+    description: "Space-separated pip packages to install at startup, e.g. a new wake word plugin"
+  zeroconf:
+    name: "Zeroconf"
+    description: "Advertise this service via mDNS/zeroconf for auto-discovery"
+  log_level:
+    name: "Log level"
+    description: "Verbosity of the add-on log"

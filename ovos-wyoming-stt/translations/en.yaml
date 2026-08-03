@@ -1,0 +1,13 @@
+configuration:
+  plugin:
+    name: "STT plugin"
+    description: "OVOS STT plugin module name (e.g. ovos-stt-plugin-server, ovos-stt-plugin-whisper)"
+  plugin_config:
+    name: "Plugin configuration"
+    description: "JSON object with plugin-specific settings"
+  extra_pip_packages:
+    name: "Extra pip packages"
+    description: "Space-separated pip packages to install at startup, e.g. a new STT plugin"
+  log_level:
+    name: "Log level"
+    description: "Verbosity of the add-on log"

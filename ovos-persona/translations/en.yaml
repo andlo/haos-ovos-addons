@@ -1,0 +1,13 @@
+configuration:
+  solvers:
+    name: "Solvers"
+    description: "Ordered list of OVOS solver plugins — first one that answers wins"
+  solver_config:
+    name: "Solver configuration"
+    description: "JSON object with per-solver settings, e.g. API keys"
+  extra_pip_packages:
+    name: "Extra pip packages"
+    description: "Space-separated pip packages to install at startup, e.g. a new solver plugin"
+  log_level:
+    name: "Log level"
+    description: "Verbosity of the add-on log"

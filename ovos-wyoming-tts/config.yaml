@@ -1,0 +1,25 @@
+name: "OVOS Wyoming TTS"
+version: "0.1.0"
+slug: "ovos_wyoming_tts"
+description: "Expose an OVOS text-to-speech plugin via Wyoming for use in Assist pipelines"
+url: "https://github.com/andlo/haos-ovos-addons/tree/master/ovos-wyoming-tts"
+arch:
+  - aarch64
+  - amd64
+init: false
+startup: services
+boot: auto
+ports:
+  10200/tcp: 10200
+ports_description:
+  10200/tcp: "Wyoming protocol port"
+options:
+  plugin: "ovos-tts-plugin-server"
+  plugin_config: "{}"
+  extra_pip_packages: ""
+  log_level: "info"
+schema:
+  plugin: "str"
+  plugin_config: "str"
+  extra_pip_packages: "str"
+  log_level: "list(debug|info|warning|error)"

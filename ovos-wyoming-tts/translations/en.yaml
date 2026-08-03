@@ -1,0 +1,13 @@
+configuration:
+  plugin:
+    name: "TTS plugin"
+    description: "OVOS TTS plugin module name (e.g. ovos-tts-plugin-server, ovos-tts-plugin-piper)"
+  plugin_config:
+    name: "Plugin configuration"
+    description: "JSON object with plugin-specific settings, e.g. {\"voice\": \"en_US-lessac-medium\"}"
+  extra_pip_packages:
+    name: "Extra pip packages"
+    description: "Space-separated pip packages to install at startup, e.g. a new TTS plugin"
+  log_level:
+    name: "Log level"
+    description: "Verbosity of the add-on log"
