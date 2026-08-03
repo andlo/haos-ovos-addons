@@ -21,8 +21,20 @@ option in **Settings → Voice assistants → Pipelines**.
 The default plugin (`ovos-tts-plugin-server`) uses OVOS's public hosted server and needs no
 configuration to try out.
 
+## Upstream bug workaround (TODO: remove once fixed upstream)
+
+`wyoming-ovos-tts` has a bug: its `TtsProgram(...)` call passes `version=__version__`, but the
+nested `TtsVoice(...)` call omits it entirely. Against `wyoming>=1.9` this crashes at startup
+with `TypeError: TtsVoice.__init__() missing 1 required positional argument: 'version'`. The
+`Dockerfile` patches the installed source in place to fix this until it's fixed upstream.
+
+- Upstream PR: [OpenVoiceOS/wyoming-ovos-tts#11](https://github.com/OpenVoiceOS/wyoming-ovos-tts/pull/11)
+- **Once that PR is merged and a new PyPI release is cut**, remove the `RUN python3 -c "..."`
+  patch step from the `Dockerfile` and just install `wyoming-ovos-tts` directly again.
+
 ## Known limitations
 
 - `plugin_config` is a single JSON text field, not a per-plugin form — you need to know the
   plugin's own config keys.
-- Not yet verified against a real HAOS Supervisor install.
+- Verified working on a real HAOS Supervisor as of v0.0.3 (build succeeds, add-on starts,
+  reaches `INFO:root:Ready`). Not yet verified end-to-end inside an actual Assist pipeline.
