@@ -13,6 +13,8 @@ ports:
   10400/tcp: 10400
 ports_description:
   10400/tcp: "Wyoming protocol port"
+discovery:
+  - wyoming
 options:
   hotwords_config: '{"hey_mycroft": {"module": "ovos-ww-plugin-precise-lite", "model": "https://github.com/OpenVoiceOS/precise-lite-models/raw/master/wakewords/en/hey_mycroft.tflite"}}'
   extra_pip_packages: ""

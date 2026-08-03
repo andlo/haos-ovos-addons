@@ -13,6 +13,8 @@ ports:
   10300/tcp: 10300
 ports_description:
   10300/tcp: "Wyoming protocol port"
+discovery:
+  - wyoming
 options:
   plugin: "ovos-stt-plugin-server"
   plugin_config: "{}"
