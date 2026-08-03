@@ -11,7 +11,7 @@ FROM ghcr.io/home-assistant/base:latest
 # than avoiding a fresh footgun.
 RUN apk add --no-cache python3 py3-pip jq build-base portaudio-dev python3-dev \
  && pip install --no-cache-dir --break-system-packages \
-      setuptools wyoming-ovos-wakeword ovos-ww-plugin-precise-lite
+      "setuptools<=80.9.0" wyoming-ovos-wakeword ovos-ww-plugin-precise-lite
 
 COPY run.sh /
 RUN chmod a+x /run.sh
