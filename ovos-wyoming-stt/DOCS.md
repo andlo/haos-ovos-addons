@@ -27,4 +27,7 @@ configuration to try out.
   plugin's own config keys.
 - Heavier local STT plugins (e.g. Whisper models) may need more CPU/RAM than a default HAOS
   install has to spare — not yet benchmarked.
-- Not yet verified against a real HAOS Supervisor install.
+- Verified end-to-end on a real HAOS Supervisor: builds, starts cleanly with no errors in the
+  log, appears under Settings → Devices & services, and is selectable as an STT engine in an
+  Assist pipeline once confirmed. Not yet verified that transcription is actually accurate —
+  only that the plumbing works.
