@@ -1,5 +1,5 @@
 name: "OVOS Wyoming TTS"
-version: "0.0.2"
+version: "0.0.3"
 slug: "ovos_wyoming_tts"
 description: "Expose an OVOS text-to-speech plugin via Wyoming for use in Assist pipelines"
 url: "https://github.com/andlo/haos-ovos-addons/tree/master/ovos-wyoming-tts"
