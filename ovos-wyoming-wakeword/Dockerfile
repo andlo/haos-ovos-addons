@@ -9,7 +9,7 @@ FROM ghcr.io/home-assistant/base:latest
 # package would also remove that runtime .so as an orphaned dependency.
 # Worth revisiting once this add-on is stable and image size matters more
 # than avoiding a fresh footgun.
-RUN apk add --no-cache python3 py3-pip jq build-base portaudio-dev \
+RUN apk add --no-cache python3 py3-pip jq build-base portaudio-dev python3-dev \
  && pip install --no-cache-dir --break-system-packages \
       wyoming-ovos-wakeword ovos-ww-plugin-precise-lite
 
