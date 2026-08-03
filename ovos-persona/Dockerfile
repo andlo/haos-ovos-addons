@@ -11,9 +11,16 @@ FROM ghcr.io/home-assistant/base:latest
 # opm.agents.retrieval entry point, not opm.solver.question, so it is NOT
 # usable by ovos-persona-server as-is — dropped from defaults until a
 # compatible wikipedia question-solver package is found.
-RUN apk add --no-cache python3 py3-pip jq \
+# PyPI's published ovos-persona-server (0.5.0) is stale relative to the
+# dev branch — it's missing the ovos_persona_server/schemas submodule
+# entirely (ModuleNotFoundError at startup) and under-declares several
+# dependencies (ovos-workshop, uvicorn) that dev's pyproject.toml already
+# lists. Installing straight from git@dev instead of PyPI until a new
+# PyPI release catches up.
+RUN apk add --no-cache python3 py3-pip jq git \
  && pip install --no-cache-dir --break-system-packages \
-      ovos-persona-server ovos-workshop uvicorn ovos-ddg-solver-plugin ovos-solver-failure-plugin
+      "git+https://github.com/OpenVoiceOS/ovos-persona-server.git@dev" \
+      ovos-ddg-solver-plugin ovos-solver-failure-plugin
 
 COPY run.sh /
 RUN chmod a+x /run.sh
