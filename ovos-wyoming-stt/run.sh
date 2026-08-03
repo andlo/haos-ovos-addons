@@ -18,6 +18,16 @@ jq -n \
   '{stt: ({module: $plugin} + {($plugin): $pconf})}' \
   > "${CONF_DIR}/mycroft.conf"
 
+(
+  bash -c "until echo '{ \"type\": \"describe\" }' > /dev/tcp/localhost/10300; do sleep 0.5; done" > /dev/null 2>&1 || true
+  config=$(bashio::var.json uri "tcp://$(hostname):10300")
+  if bashio::discovery "wyoming" "${config}" > /dev/null; then
+    bashio::log.info "Successfully sent discovery information to Home Assistant."
+  else
+    bashio::log.error "Discovery message to Home Assistant failed!"
+  fi
+) &
+
 bashio::log.info "Starting wyoming-ovos-stt with plugin ${PLUGIN}"
 
 exec wyoming-ovos-stt \

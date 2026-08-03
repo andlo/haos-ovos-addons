@@ -18,6 +18,18 @@ jq -n \
   '{tts: ({module: $plugin} + {($plugin): $pconf})}' \
   > "${CONF_DIR}/mycroft.conf"
 
+# Tell Home Assistant this is a Wyoming service once the port is up
+# (same pattern as the official Piper add-on's discovery script).
+(
+  bash -c "until echo '{ \"type\": \"describe\" }' > /dev/tcp/localhost/10200; do sleep 0.5; done" > /dev/null 2>&1 || true
+  config=$(bashio::var.json uri "tcp://$(hostname):10200")
+  if bashio::discovery "wyoming" "${config}" > /dev/null; then
+    bashio::log.info "Successfully sent discovery information to Home Assistant."
+  else
+    bashio::log.error "Discovery message to Home Assistant failed!"
+  fi
+) &
+
 bashio::log.info "Starting wyoming-ovos-tts with plugin ${PLUGIN}"
 
 exec wyoming-ovos-tts \

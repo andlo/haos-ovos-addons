@@ -12,9 +12,17 @@ fi
 CONF_DIR="${HOME:-/root}/.config/mycroft"
 mkdir -p "${CONF_DIR}"
 
-# Unlike TTS/STT, all configured wake words are loaded on demand — there is
-# no single "active plugin", so the whole hotwords dict is written as-is.
 jq -n --argjson hw "$HOTWORDS" '{hotwords: $hw}' > "${CONF_DIR}/mycroft.conf"
+
+(
+  bash -c "until echo '{ \"type\": \"describe\" }' > /dev/tcp/localhost/10400; do sleep 0.5; done" > /dev/null 2>&1 || true
+  config=$(bashio::var.json uri "tcp://$(hostname):10400")
+  if bashio::discovery "wyoming" "${config}" > /dev/null; then
+    bashio::log.info "Successfully sent discovery information to Home Assistant."
+  else
+    bashio::log.error "Discovery message to Home Assistant failed!"
+  fi
+) &
 
 bashio::log.info "Starting wyoming-ovos-wakeword"
 
