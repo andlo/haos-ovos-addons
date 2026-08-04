@@ -265,6 +265,12 @@ def health():
     return {"bus_connected": bool(bus and bus.connected_event.is_set())}
 
 
+@app.get("/debug/test-show")
+def debug_test_show(package: str):
+    """TEMPORARY."""
+    return {"pip_show_files": _pip_show_files(package)}
+
+
 @app.get("/skills/running")
 def running_skills():
     """Status of every skill process this container is currently
