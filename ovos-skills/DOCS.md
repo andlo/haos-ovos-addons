@@ -62,8 +62,21 @@ in HA.
 
 ## Known limitations
 
+- **No way to update an already-installed skill.** Confirmed directly: calling `pip install
+  <package>` again (matching `SkillsStore`'s exact call pattern — `handle_install_skill()`
+  never passes `--upgrade`) on an already-installed package is a silent no-op, version stays
+  the same. Genuine, small upstream code gap, not a release-drift issue like the ones above —
+  filed a PR adding a `skills.installer.upgrade` config option (same pattern as the existing
+  `allow_alphas`/`break_system_packages` flags), verified it actually advances the version
+  before submitting: [OpenVoiceOS/ovos-core#843](https://github.com/OpenVoiceOS/ovos-core/pull/843).
+  Not usable from our side yet — same PyPI-lag problem as uninstall below, since it needs a
+  new `ovos-core` release to reach us.
 - **`DELETE /skills/{id}` doesn't work yet** — upstream `SkillsStore.handle_uninstall_skill()`
-  is a stub on the current PyPI `ovos-core`. See "What was fixed on real hardware" above.
+  is a stub on the current PyPI `ovos-core`. Different situation from the upgrade gap above:
+  this one is **already fixed in `dev`** (real implementation, confirmed by reading the
+  source directly), just not releasable to PyPI without also resolving `ovos-core@dev`'s
+  version conflict with `ovos-messagebus` (see "What was fixed on real hardware" above) — a
+  release-coordination problem across two repos, not something a single PR here can fix.
 - `GET /skills` (list installed) is a naming-convention heuristic — confirmed working against
   a real installed skill (`ovos-skill-date-time`), but still just a heuristic, not a
   guaranteed-correct mechanism for skills that don't follow the naming convention.
