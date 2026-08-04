@@ -8,6 +8,7 @@ the module-level lock below).
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from contextlib import asynccontextmanager
 
@@ -57,6 +58,24 @@ class AskRequest(BaseModel):
 @app.get("/health")
 def health():
     return {"bus_connected": bool(bus and bus.connected_event.is_set())}
+
+
+@app.get("/debug/skill-files")
+def debug_skill_files():
+    """TEMPORARY: confirm whether ovos-skill-date-time's locale/ resource
+    directory actually made it into the installed package on this specific
+    Alpine build -- the sandbox spike (Debian/Ubuntu) had it and worked;
+    real hardware is logging 'Unable to find X.intent' and a much smaller
+    m2v prototype count (76 vs 2333), suggesting it may not have. Remove
+    once resolved -- see DOCS.md.
+    """
+    import ovos_skill_date_time
+    pkg_dir = os.path.dirname(ovos_skill_date_time.__file__)
+    tree = {}
+    for root, dirs, files in os.walk(pkg_dir):
+        rel = os.path.relpath(root, pkg_dir)
+        tree[rel] = files
+    return {"pkg_dir": pkg_dir, "tree": tree}
 
 
 def _ask_sync(utterance: str, lang: str) -> dict | None:
