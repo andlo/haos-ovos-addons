@@ -19,6 +19,7 @@ existing, already-maintained OVOS component — not new, unproven code.
 | `ovos-wyoming-wakeword` | Wakeword slot in the Assist pipeline | wyoming-ovos-wakeword |
 | `ovos-persona` | Conversation agent (Ollama-compatible) | [ovos-persona-server](https://github.com/OpenVoiceOS/ovos-persona-server) |
 | `ovos-skills` | Install/remove/list OVOS skills via a small API | `ovos-core`'s own [SkillsStore](https://github.com/OpenVoiceOS/ovos-core/blob/dev/ovos_core/skill_installer.py), called by [ha-ovos-integration](https://github.com/andlo/ha-ovos-integration)'s config subentries |
+| `ovos-core` | Actually runs installed skills — intent matching, skill manager, a synchronous question/answer HTTP endpoint usable as a Home Assistant conversation agent | `ovos-core` itself, the real skill runtime (not just its `SkillsStore` submodule, unlike `ovos-skills` above) |
 
 `ovos-skill-config` (wrapping [ovos-skill-config-tool](https://github.com/OscillateLabsLLC/ovos-skill-config-tool))
 was planned but never built — superseded by config subentries in
@@ -32,10 +33,14 @@ they just need this packaging to show up in HA's own world.
 
 ## Status
 
-All five add-ons build and are discovered by HA on real hardware — see each add-on's own
+All six add-ons build and are discovered by HA on real hardware — see each add-on's own
 `DOCS.md` for exactly what's verified and what isn't (e.g. persona's default answers are weak
 without a real LLM solver; `ovos-skills`' install/uninstall happy path is still being
-re-verified after a hardware-discovered fix, see its `DOCS.md`).
+re-verified after a hardware-discovered fix, see its `DOCS.md`). `ovos-core` is the newest —
+confirmed answering real questions correctly end-to-end (`POST /ask` → a genuinely computed
+answer from an installed skill), but a real HA conversation-agent integration on top of it
+hasn't been built yet — see its `DOCS.md` for the full story, including a long but
+successfully-resolved investigation into a real-hardware-only performance issue.
 
 ## Related repos
 
