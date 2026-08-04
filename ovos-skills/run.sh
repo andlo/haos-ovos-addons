@@ -39,15 +39,17 @@ if [ -d "${PERSIST_DIR}" ] && [ -n "$(ls -A "${PERSIST_DIR}" 2>/dev/null)" ]; th
   cp -a "${PERSIST_DIR}/." "${SITE_PACKAGES}/"
 fi
 
-bashio::log.info "Starting internal ovos-messagebus"
-ovos-messagebus &
-MB_PID=$!
-
-# Wait for the bus to actually accept connections before starting anything
-# that depends on it.
-for i in $(seq 1 20); do
-  (exec 3<>/dev/tcp/localhost/8181) 2>/dev/null && { exec 3>&- 3<&-; break; }
-  sleep 0.5
+bashio::log.info "Waiting for the shared ovos-messagebus (hosted by ovos-core) to accept connections"
+# No longer starting our own private ovos-messagebus here -- see
+# DEVELOPER.md's "Skill runtime" section. This container now connects to
+# the SHARED bus hosted by ovos-core (b8e040e3-ovos-core:8181) instead of
+# running its own, isolated one. ovos-skill-installer and api.py both
+# read websocket.host from the shared mycroft.conf via Configuration(),
+# same as before -- the only change is what that shared value now points
+# at.
+for i in $(seq 1 60); do
+  (exec 3<>/dev/tcp/b8e040e3-ovos-core/8181) 2>/dev/null && { exec 3>&- 3<&-; break; }
+  sleep 1
 done
 
 bashio::log.info "Starting ovos-skill-installer (SkillsStore, standalone)"
