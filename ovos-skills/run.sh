@@ -56,5 +56,10 @@ bashio::log.info "Starting ovos-skill-installer (SkillsStore, standalone)"
 ovos-skill-installer &
 SI_PID=$!
 
+# api.py's own lifespan handler discovers every currently-installed
+# skill and launches an ovos-skill-launcher process for each one
+# (SkillProcessManager, see api.py) -- separate from ovos-skill-installer
+# above, which only handles install/uninstall commands over the bus, not
+# running skills. No separate startup step needed here for that.
 bashio::log.info "Starting API on :8500"
 exec python3 /api.py

@@ -18,6 +18,7 @@ import site
 import subprocess
 import sys
 import threading
+import time
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -46,7 +47,134 @@ BUS_TIMEOUT = 300  # generous — this now runs in a background thread, not
 
 bus: MessageBusClient | None = None
 jobs: dict[str, dict] = {}  # key: url (install) or skill_id (uninstall)
-launched: dict[str, Any] = {}  # TEMPORARY, see /debug/launch-skill
+
+
+class SkillProcessManager:
+    """Launches and supervises one `ovos-skill-launcher <skill_id>`
+    subprocess per installed skill, each connecting independently to the
+    shared bus. Confirmed for real: a skill launched this way, in this
+    container, answers correctly through ovos-core's own /ask -- it
+    never needs to be present in ovos-core's own site-packages (see
+    DEVELOPER.md's "Skill runtime" section for the full proof). This is
+    the permanent replacement for the manual /debug/launch-skill endpoint
+    used to first confirm the mechanism.
+
+    Discovers installed skills via importlib.metadata entry_points
+    (group 'opm.skill', falling back to the deprecated 'ovos.plugin.skill'
+    for older skill packages) rather than guessing from pip package names
+    -- confirmed this gives the exact dotted skill_id ovos-skill-launcher
+    needs, AND the real owning package name in the same call, so install/
+    uninstall can look up the right running process without fuzzy
+    matching.
+    """
+
+    MAX_RESTARTS = 5  # per skill_id, not reset -- a skill that crashes
+                       # this many times has a real bug, not a transient
+                       # hiccup; stop burning CPU on an infinite restart
+                       # loop and leave it visibly dead in status() for a
+                       # human to notice, rather than silently retrying
+                       # forever.
+    MONITOR_INTERVAL = 10
+
+    def __init__(self):
+        self._procs: dict[str, subprocess.Popen] = {}
+        self._restart_counts: dict[str, int] = {}
+        self._stopping: set[str] = set()
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def _discover() -> dict[str, str]:
+        """Returns {skill_id: package_name} for every currently-installed
+        skill in this container.
+        """
+        result: dict[str, str] = {}
+        for group in ("opm.skill", "ovos.plugin.skill"):
+            for ep in importlib.metadata.entry_points(group=group):
+                if ep.name not in result:
+                    result[ep.name] = ep.dist.name if ep.dist else ep.name
+        return result
+
+    def package_name_for(self, skill_id: str) -> str | None:
+        return self._discover().get(skill_id)
+
+    def skill_id_for_package(self, package_name: str) -> str | None:
+        for skill_id, pkg in self._discover().items():
+            if pkg == package_name:
+                return skill_id
+        return None
+
+    def launch(self, skill_id: str):
+        with self._lock:
+            existing = self._procs.get(skill_id)
+            if existing is not None and existing.poll() is None:
+                return  # already running
+            self._stopping.discard(skill_id)
+            proc = subprocess.Popen(
+                ["ovos-skill-launcher", skill_id],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            )
+            self._procs[skill_id] = proc
+        LOG.info(f"Launched skill process for {skill_id} (pid {proc.pid})")
+
+    def stop(self, skill_id: str):
+        with self._lock:
+            self._stopping.add(skill_id)
+            proc = self._procs.pop(skill_id, None)
+            self._restart_counts.pop(skill_id, None)
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+        LOG.info(f"Stopped skill process for {skill_id}")
+
+    def discover_and_launch_all(self):
+        """Launch every currently-installed skill. Called once at
+        startup, after both this container's persisted packages are
+        restored (run.sh) and the shared bus is confirmed reachable.
+        """
+        for skill_id in self._discover():
+            self.launch(skill_id)
+
+    def _monitor_loop(self):
+        while True:
+            time.sleep(self.MONITOR_INTERVAL)
+            with self._lock:
+                items = list(self._procs.items())
+            for skill_id, proc in items:
+                if proc.poll() is None or skill_id in self._stopping:
+                    continue  # still running, or deliberately stopped
+                count = self._restart_counts.get(skill_id, 0) + 1
+                self._restart_counts[skill_id] = count
+                if count > self.MAX_RESTARTS:
+                    LOG.error(
+                        f"Skill process for {skill_id} died (rc={proc.returncode}) "
+                        f"{count} times, giving up -- see its own stdout/stderr in logs"
+                    )
+                    continue
+                LOG.warning(
+                    f"Skill process for {skill_id} died (rc={proc.returncode}), "
+                    f"restarting (attempt {count}/{self.MAX_RESTARTS})"
+                )
+                self.launch(skill_id)
+
+    def start_monitor(self):
+        threading.Thread(target=self._monitor_loop, daemon=True).start()
+
+    def status(self) -> dict:
+        with self._lock:
+            return {
+                skill_id: {
+                    "running": proc.poll() is None,
+                    "pid": proc.pid,
+                    "restart_count": self._restart_counts.get(skill_id, 0),
+                }
+                for skill_id, proc in self._procs.items()
+            }
+
+
+skill_procs = SkillProcessManager()
 
 
 @asynccontextmanager
@@ -55,6 +183,8 @@ async def lifespan(app: FastAPI):
     bus = MessageBusClient()
     bus.run_in_thread()
     bus.connected_event.wait(timeout=10)
+    skill_procs.discover_and_launch_all()
+    skill_procs.start_monitor()
     yield
     if bus:
         bus.close()
@@ -102,70 +232,14 @@ def health():
     return {"bus_connected": bool(bus and bus.connected_event.is_set())}
 
 
-@app.get("/debug/shared-bus-test")
-def debug_shared_bus_test():
-    """TEMPORARY: test whether this container can actually reach
-    ovos-core's shared messagebus at its real hostname -- the first real
-    cross-container test of the "bind to own hostname instead of
-    0.0.0.0" hypothesis (see ovos-core/DOCS.md). Opens a SEPARATE
-    MessageBusClient with explicit host/port, independent of this
-    container's own private bus connection above. Remove once resolved.
+@app.get("/skills/running")
+def running_skills():
+    """Status of every skill process this container is currently
+    supervising -- running/dead, PID, and how many times it's been
+    restarted. See SkillProcessManager's own docstring for the full
+    mechanism this reports on.
     """
-    import time as _time
-    test_bus = MessageBusClient(host="b8e040e3-ovos-core", port=8181)
-    test_bus.run_in_thread()
-    connected = test_bus.connected_event.wait(timeout=10)
-    result = {"connected": connected}
-    if connected:
-        # round-trip a real message to prove it's not just a TCP handshake
-        got_reply = {}
-        done = threading.Event()
-
-        def on_pong(message):
-            got_reply["data"] = message.data
-            done.set()
-
-        test_bus.once("mycroft.debug.pong", on_pong)
-        test_bus.emit(Message("mycroft.debug.ping", {}))
-        done.wait(timeout=3)
-        result["ping_pong"] = got_reply
-    test_bus.close()
-    return result
-
-
-@app.post("/debug/launch-skill")
-def debug_launch_skill(skill_id: str = Body(..., embed=True)):
-    """TEMPORARY: the real test of the "skill runtime lives in its own
-    container" architecture (see DEVELOPER.md's "Skill runtime" section)
-    -- run ovos-skill-launcher for an already-installed skill package
-    RIGHT HERE, in ovos-skills' own container, connected to the SHARED
-    bus (via the same shared mycroft.conf websocket.host this container
-    already successfully connects to -- confirmed by /health). If
-    ovos-core's own /ask can then answer using this skill, the skill
-    never needed to be physically present in ovos-core's own
-    site-packages at all. Remove once resolved.
-    """
-    proc = subprocess.Popen(
-        ["ovos-skill-launcher", skill_id],
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-    )
-    launched["proc"] = proc
-    return {"pid": proc.pid, "skill_id": skill_id}
-
-
-@app.get("/debug/launch-skill/status")
-def debug_launch_skill_status():
-    """TEMPORARY: check whether the launched skill process (see above)
-    is still alive, and its output so far, without blocking on it.
-    """
-    proc = launched.get("proc")
-    if proc is None:
-        return {"running": False, "error": "nothing launched yet"}
-    alive = proc.poll() is None
-    output = ""
-    if not alive:
-        output = proc.stdout.read() if proc.stdout else ""
-    return {"running": alive, "returncode": proc.returncode, "output_tail": output[-3000:]}
+    return skill_procs.status()
 
 
 @app.get("/catalog")
@@ -227,6 +301,15 @@ def _run_job(job_key: str, msg_type: str, data: dict, ok_type: str, fail_type: s
             # installed and usable right now, it just won't survive a
             # future add-on rebuild. Log loudly, don't flip the job status.
             LOG.error(f"Failed to persist newly-installed packages: {exc}")
+
+        # Hot-launch: start the skill process immediately, no container
+        # restart needed. entry_points() only sees packages actually on
+        # disk, so this naturally picks up whatever was just installed --
+        # confirmed the mechanism itself works end-to-end (see
+        # DEVELOPER.md's "Skill runtime" section); this wires it into the
+        # real install flow instead of a manual debug call.
+        for skill_id in skill_procs._discover():
+            skill_procs.launch(skill_id)
 
 
 def _site_packages_dir() -> str:
@@ -460,6 +543,10 @@ def _direct_pip_uninstall(package_name: str) -> tuple[bool, str]:
 
     if norm(package_name) in PROTECTED_PACKAGES:
         return False, f"refusing to uninstall protected package: {package_name}"
+
+    skill_id = skill_procs.skill_id_for_package(package_name)
+    if skill_id is not None:
+        skill_procs.stop(skill_id)
 
     _remove_persisted_package(package_name)
 
