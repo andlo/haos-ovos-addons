@@ -9,14 +9,25 @@ if [ -n "${EXTRA_PIP}" ]; then
   pip install --no-cache-dir --break-system-packages ${EXTRA_PIP}
 fi
 
-CONF_DIR="${HOME:-/root}/.config/mycroft"
+# Shared OVOS config lives on /share so all haos-ovos-addons add-ons (and
+# eventually ha-ovos-integration) read/write the same mycroft.conf instead
+# of each holding its own disconnected copy. ovos-config's Configuration()
+# already respects XDG_CONFIG_HOME, so this is enough to make every OVOS
+# tool in this container use the shared file automatically.
+export XDG_CONFIG_HOME=/share
+CONF_DIR="/share/mycroft"
+CONF_FILE="${CONF_DIR}/mycroft.conf"
 mkdir -p "${CONF_DIR}"
+[ -f "${CONF_FILE}" ] || echo '{}' > "${CONF_FILE}"
 
-jq -n \
+# Merge, don't overwrite: other add-ons (stt, wakeword, persona) write their
+# own top-level keys into this same file. jq's `+` does a shallow merge —
+# our "tts" key replaces any previous value, everything else is preserved.
+jq \
   --arg plugin "$PLUGIN" \
   --argjson pconf "$PLUGIN_CONFIG" \
-  '{tts: ({module: $plugin} + {($plugin): $pconf})}' \
-  > "${CONF_DIR}/mycroft.conf"
+  '. + {tts: ({module: $plugin} + {($plugin): $pconf})}' \
+  "${CONF_FILE}" > "${CONF_FILE}.tmp" && mv "${CONF_FILE}.tmp" "${CONF_FILE}"
 
 # Tell Home Assistant this is a Wyoming service once the port is up
 # (same pattern as the official Piper add-on's discovery script).
