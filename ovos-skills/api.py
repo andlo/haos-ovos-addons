@@ -279,10 +279,12 @@ def _find_installed_package(hint: str) -> str | None:
 
     hint_norm = norm(hint)
     names = [d.metadata["Name"] for d in importlib.metadata.distributions() if d.metadata["Name"]]
+    LOG.warning(f"UNINSTALL DEBUG3: hint_norm='{hint_norm}', total names seen={len(names)}, date-related names={[n for n in names if 'date' in n.lower()]}")
     for name in names:
         if norm(name) == hint_norm:
             return name
     candidates = [name for name in names if hint_norm in norm(name) or norm(name) in hint_norm]
+    LOG.warning(f"UNINSTALL DEBUG3: no exact match, candidates={candidates}")
     return candidates[0] if len(candidates) == 1 else None
 
 
