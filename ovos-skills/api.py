@@ -12,6 +12,7 @@ import importlib.metadata
 import json
 import logging
 import os
+import re
 import shutil
 import site
 import subprocess
@@ -304,59 +305,39 @@ PROTECTED_PACKAGES = {
 }
 
 
-def _remove_persisted_package(package_name: str) -> None:
-    """Remove a package's files from PERSIST_DIR too — must run BEFORE
-    the actual pip uninstall, since importlib.metadata.files() only
-    works while the package is still installed. Otherwise an uninstalled
-    skill would silently reappear on the next container restart via
-    run.sh's restore step.
+def _remove_package_dir_files(base_dir: str, package_name: str) -> bool:
+    """Deletes a package's dist-info dir and its module(s) from base_dir,
+    found via PEP 503 normalized-name matching against dist-info dir
+    names (<normalized_name>-<version>.dist-info) and their
+    top_level.txt — not importlib.metadata, which is unreliable in this
+    long-running process for packages restored via file-copy rather than
+    a pip install run inside it (confirmed for real: 85 packages seen,
+    a genuinely-on-disk target package not among them, even after both
+    importlib.invalidate_caches() and reload(importlib.metadata)).
+
+    Works identically against site-packages and PERSIST_DIR — both need
+    this, and having two different (and differently broken) mechanisms
+    for what's conceptually the same operation was the actual bug that
+    caused an uninstalled skill to reappear after a rebuild: the
+    site-packages side got fixed, but PERSIST_DIR's own removal was
+    still going through the old, unreliable importlib.metadata path and
+    silently doing nothing.
     """
-    try:
-        files = importlib.metadata.files(package_name) or []
-    except importlib.metadata.PackageNotFoundError:
-        return
-    sp_dir = _site_packages_dir()
-    for f in files:
-        src = str(f.locate())
-        try:
-            rel = os.path.relpath(src, sp_dir)
-        except ValueError:
-            continue
-        if rel.startswith(".."):
-            continue
-        target = os.path.join(PERSIST_DIR, rel)
-        if os.path.isfile(target):
-            os.remove(target)
-
-
-def _manual_remove_package(package_name: str) -> tuple[bool, str]:
-    """Fallback for when `pip uninstall` refuses with "no RECORD file was
-    found" — confirmed for real that our persist/restore cycle doesn't
-    reliably preserve a package's RECORD file intact (pip's own error
-    message names the exact package and file it's missing). Deletes the
-    package directly: find its dist-info dir by PEP 503 normalized-name
-    match (dist-info dirs are named <normalized_name>-<version>.dist-info,
-    with '_' in the name and '-' only as the version separator — mixing
-    those up was an earlier bug in this same function, caught by testing
-    against a real dist-info dir before trusting it), read its
-    top_level.txt for the actual module name(s), remove both.
-    """
-    import re
-
-    sp_dir = _site_packages_dir()
+    if not os.path.isdir(base_dir):
+        return False
 
     def norm(s: str) -> str:
         return s.lower().replace("-", "_")
 
     target_norm = norm(package_name)
     removed = False
-    for entry in os.listdir(sp_dir):
+    for entry in os.listdir(base_dir):
         if not entry.endswith(".dist-info"):
             continue
         m = re.match(r"^(.+?)-[^-]+\.dist-info$", entry)
         if not m or norm(m.group(1)) != target_norm:
             continue
-        dist_info_path = os.path.join(sp_dir, entry)
+        dist_info_path = os.path.join(base_dir, entry)
         top_level_file = os.path.join(dist_info_path, "top_level.txt")
         module_names = []
         if os.path.isfile(top_level_file):
@@ -365,13 +346,30 @@ def _manual_remove_package(package_name: str) -> tuple[bool, str]:
         shutil.rmtree(dist_info_path, ignore_errors=True)
         removed = True
         for mod in module_names:
-            mod_path = os.path.join(sp_dir, mod)
+            mod_path = os.path.join(base_dir, mod)
             if os.path.isdir(mod_path):
                 shutil.rmtree(mod_path, ignore_errors=True)
             elif os.path.isfile(mod_path + ".py"):
                 os.remove(mod_path + ".py")
+    return removed
 
-    if removed:
+
+def _remove_persisted_package(package_name: str) -> None:
+    """Remove a package's files from PERSIST_DIR too — must run BEFORE
+    the actual pip uninstall, so a subsequent restart doesn't restore an
+    uninstalled skill. See _remove_package_dir_files for why this uses
+    dist-info scanning, not importlib.metadata.
+    """
+    _remove_package_dir_files(PERSIST_DIR, package_name)
+
+
+def _manual_remove_package(package_name: str) -> tuple[bool, str]:
+    """Fallback for when `pip uninstall` refuses with "no RECORD file was
+    found" — confirmed for real that our persist/restore cycle doesn't
+    reliably preserve a package's RECORD file intact (pip's own error
+    message names the exact package and file it's missing).
+    """
+    if _remove_package_dir_files(_site_packages_dir(), package_name):
         return True, ""
     return False, f"Could not find a dist-info directory for '{package_name}' to manually remove"
 
