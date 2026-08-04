@@ -105,11 +105,12 @@ def list_installed_skills():
     """
     try:
         raw = subprocess.check_output(
-            ["pip", "list", "--format=json", "--break-system-packages"],
+            ["pip", "list", "--format=json"],
             text=True,
+            stderr=subprocess.STDOUT,
         )
     except subprocess.CalledProcessError as exc:
-        raise HTTPException(status_code=500, detail=f"pip list failed: {exc}")
+        raise HTTPException(status_code=500, detail=f"pip list failed: {exc.output}")
 
     packages = json.loads(raw)
     skills = [
