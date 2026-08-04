@@ -95,6 +95,35 @@ def debug_mycroft_conf():
     return {"exists": True, "path": path, "content": content}
 
 
+@app.post("/debug/ask-verbose")
+def debug_ask_verbose(req: AskRequest):
+    """TEMPORARY: neither resource files nor lang explain the missing
+    response -- listen for EVERY bus message for a window after emitting
+    the utterance, instead of only ovos.utterance.speak, to see what
+    actually happens on real hardware that didn't happen in the sandbox.
+    Note: the client's own 'message' event fires with the raw payload,
+    not a parsed Message (confirmed by reading client.py directly) --
+    parse it ourselves and skip anything that fails to decode.
+    """
+    import json as _json
+    import time as _time
+    seen: list[dict] = []
+
+    def on_any(raw):
+        try:
+            parsed = _json.loads(raw) if isinstance(raw, str) else raw
+            seen.append({"type": parsed.get("type"), "data": parsed.get("data")})
+        except Exception as exc:
+            seen.append({"type": "<unparsed>", "data": str(exc)})
+
+    bus.on("message", on_any)
+    bus.emit(Message("recognizer_loop:utterance",
+                      {"utterances": [req.utterance], "lang": req.lang}))
+    _time.sleep(5)
+    bus.remove("message", on_any)
+    return {"message_count": len(seen), "messages": seen}
+
+
 def _ask_sync(utterance: str, lang: str) -> dict | None:
     """The exact emit/wait pattern confirmed in the sandbox spike: send
     recognizer_loop:utterance (same message ovos-say-to itself emits --
