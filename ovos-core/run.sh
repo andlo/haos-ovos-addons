@@ -23,14 +23,46 @@ mkdir -p "${CONF_DIR}"
 jq '. + {websocket: ((.websocket // {}) + {host: "0.0.0.0", port: 8181})}' \
   "${CONF_FILE}" > "${CONF_FILE}.tmp" && mv "${CONF_FILE}.tmp" "${CONF_FILE}"
 
-# TEMPORARY DIAGNOSTIC: /ask hangs indefinitely on real hardware (no
-# response, no error, not even after 70+s) despite an identical
-# ovos-core version working correctly in the sandbox spike -- suspect a
-# network-dependent pipeline matcher (common-query, persona-pipeline)
-# blocking forever on something unreachable from this specific
-# container/network that WAS reachable from the sandbox. Blacklisting
-# both to test the hypothesis -- see DOCS.md before removing this.
+# TEMPORARY DIAGNOSTIC, kept harmless: blacklisted these two during the
+# "is it hanging on a network call" investigation (see DOCS.md's "The
+# slow NUC" section -- it wasn't network, it was genuinely slow CPU-bound
+# matching). Left blacklisted since neither is needed for this add-on's
+# current scope (common-query and persona both need external services
+# this add-on doesn't set up); revisit once that scope grows.
 jq '. + {intents: ((.intents // {}) + {blacklisted_pipelines: ["ovos-common-query-pipeline-plugin", "ovos-persona-pipeline-plugin"]})}' \
+  "${CONF_FILE}" > "${CONF_FILE}.tmp" && mv "${CONF_FILE}.tmp" "${CONF_FILE}"
+
+# THE ACTUAL FIX for the real root cause (see DOCS.md's "The slow NUC"):
+# padatious (ovos-core's default intent matcher) is a C++/SWIG-compiled,
+# neural-network-trained matcher -- confirmed on this real NUC hardware
+# to take 80-90+ seconds for a single simple utterance match, vs.
+# near-instant on stronger hardware (sandbox, known-good VM). Nothing
+# was ever hanging; it was genuinely, unusably slow on this specific
+# weak hardware.
+#
+# padacioso is a lightweight, pure-Python drop-in replacement -- same
+# .intent file format, same registration bus messages
+# (padatious:register_intent etc., confirmed by reading its source
+# directly), simple fuzzy-matching instead of a trained model. Already
+# installed (a padacioso dependency of ovos-core[plugins] itself), but
+# NOT in ovos-config's own default `intents.pipeline` list -- only
+# padatious is there by default, so padacioso was never actually being
+# used despite being present. Explicitly override the pipeline list here
+# to use padacioso instead of padatious at every confidence tier.
+jq '. + {intents: ((.intents // {}) + {pipeline: [
+  "ovos-stop-pipeline-plugin-high",
+  "ovos-converse-pipeline-plugin",
+  "ovos-ocp-pipeline-plugin-high",
+  "ovos-padacioso-pipeline-plugin",
+  "ovos-adapt-pipeline-plugin-high",
+  "ovos-m2v-pipeline-high",
+  "ovos-ocp-pipeline-plugin-medium",
+  "ovos-fallback-pipeline-plugin-high",
+  "ovos-stop-pipeline-plugin-medium",
+  "ovos-adapt-pipeline-plugin-medium",
+  "ovos-fallback-pipeline-plugin-medium",
+  "ovos-fallback-pipeline-plugin-low"
+]})}' \
   "${CONF_FILE}" > "${CONF_FILE}.tmp" && mv "${CONF_FILE}.tmp" "${CONF_FILE}"
 
 if [ -n "${EXTRA_PIP}" ]; then
