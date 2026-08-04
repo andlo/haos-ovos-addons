@@ -46,6 +46,7 @@ BUS_TIMEOUT = 300  # generous — this now runs in a background thread, not
 
 bus: MessageBusClient | None = None
 jobs: dict[str, dict] = {}  # key: url (install) or skill_id (uninstall)
+launched: dict[str, Any] = {}  # TEMPORARY, see /debug/launch-skill
 
 
 @asynccontextmanager
@@ -130,6 +131,41 @@ def debug_shared_bus_test():
         result["ping_pong"] = got_reply
     test_bus.close()
     return result
+
+
+@app.post("/debug/launch-skill")
+def debug_launch_skill(skill_id: str = Body(..., embed=True)):
+    """TEMPORARY: the real test of the "skill runtime lives in its own
+    container" architecture (see DEVELOPER.md's "Skill runtime" section)
+    -- run ovos-skill-launcher for an already-installed skill package
+    RIGHT HERE, in ovos-skills' own container, connected to the SHARED
+    bus (via the same shared mycroft.conf websocket.host this container
+    already successfully connects to -- confirmed by /health). If
+    ovos-core's own /ask can then answer using this skill, the skill
+    never needed to be physically present in ovos-core's own
+    site-packages at all. Remove once resolved.
+    """
+    proc = subprocess.Popen(
+        ["ovos-skill-launcher", skill_id],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+    )
+    launched["proc"] = proc
+    return {"pid": proc.pid, "skill_id": skill_id}
+
+
+@app.get("/debug/launch-skill/status")
+def debug_launch_skill_status():
+    """TEMPORARY: check whether the launched skill process (see above)
+    is still alive, and its output so far, without blocking on it.
+    """
+    proc = launched.get("proc")
+    if proc is None:
+        return {"running": False, "error": "nothing launched yet"}
+    alive = proc.poll() is None
+    output = ""
+    if not alive:
+        output = proc.stdout.read() if proc.stdout else ""
+    return {"running": alive, "returncode": proc.returncode, "output_tail": output[-3000:]}
 
 
 @app.get("/catalog")
