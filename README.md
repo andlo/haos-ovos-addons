@@ -32,6 +32,7 @@ No add-ons are finished yet. See [DEVELOPER.md](DEVELOPER.md) in this repo for t
 architecture and decisions behind the project.
 
 ## Related repos
+- [ha-ovos-integration](https://github.com/andlo/ha-ovos-integration) — HA integration for shared config & per-skill settings
 
 - [ovos-skill-browser](https://github.com/andlo/ovos-skill-browser) — web-based skill store, runs outside HAOS
 - [haos-ovos-skills](https://github.com/andlo/haos-ovos-skills) — deferred: skills directly inside a single HAOS container
