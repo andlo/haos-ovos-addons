@@ -265,6 +265,19 @@ def health():
     return {"bus_connected": bool(bus and bus.connected_event.is_set())}
 
 
+@app.get("/debug/check-discovery")
+def debug_check_discovery(package: str):
+    """TEMPORARY -- verify the new subprocess-based helpers actually
+    work for a given package."""
+    show_result = _pip_show_files(package)
+    discovered = skill_procs._discover()
+    return {
+        "pip_show_files": show_result,
+        "discover_result": discovered,
+        "in_discover": package in discovered.values(),
+    }
+
+
 @app.get("/skills/running")
 def running_skills():
     """Status of every skill process this container is currently
