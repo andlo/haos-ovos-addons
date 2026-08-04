@@ -100,6 +100,38 @@ def health():
     return {"bus_connected": bool(bus and bus.connected_event.is_set())}
 
 
+@app.get("/debug/persist-dir")
+def debug_persist_dir():
+    """Temporary diagnostic, round 2 — the skill reappeared again even
+    after a fully controlled test with no possible interference. First
+    round's search apparently missed something. Cast a wider net this
+    time and also directly report what importlib.metadata.files()
+    returns for the exact package name right now, live.
+    """
+    if not os.path.isdir(PERSIST_DIR):
+        return {"exists": False}
+    entries = []
+    for root, dirs, files in os.walk(PERSIST_DIR):
+        for f in files:
+            entries.append(os.path.relpath(os.path.join(root, f), PERSIST_DIR))
+        for d in dirs:
+            entries.append(os.path.relpath(os.path.join(root, d), PERSIST_DIR) + "/ (dir)")
+
+    live_files = None
+    try:
+        f = importlib.metadata.files("ovos-skill-date-time")
+        live_files = [str(x) for x in f] if f else []
+    except importlib.metadata.PackageNotFoundError as exc:
+        live_files = f"PackageNotFoundError: {exc}"
+
+    return {
+        "exists": True,
+        "total_entries": len(entries),
+        "skill_dist_info_entries": [e for e in entries if "skill" in e.lower() and "date" in e.lower()],
+        "live_importlib_files_for_ovos_skill_date_time": live_files,
+    }
+
+
 @app.get("/catalog")
 def get_catalog():
     """Proxy the official, curated skill catalog — 36 skills as of the
