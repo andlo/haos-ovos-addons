@@ -237,6 +237,25 @@ def health():
     return {"bus_connected": bool(bus and bus.connected_event.is_set())}
 
 
+@app.get("/debug/entry-points")
+def debug_entry_points(package: str):
+    """TEMPORARY debug endpoint -- removed once the wolfie discovery
+    investigation is done, see DEVELOPER.md.
+    """
+    import importlib.metadata
+    try:
+        d = importlib.metadata.distribution(package)
+    except importlib.metadata.PackageNotFoundError:
+        return {"error": f"not found: {package}"}
+    return {
+        "name": d.metadata["Name"],
+        "entry_points": [
+            {"group": ep.group, "name": ep.name, "value": ep.value}
+            for ep in d.entry_points
+        ],
+    }
+
+
 @app.get("/skills/running")
 def running_skills():
     """Status of every skill process this container is currently
