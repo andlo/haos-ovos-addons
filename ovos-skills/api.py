@@ -100,38 +100,6 @@ def health():
     return {"bus_connected": bool(bus and bus.connected_event.is_set())}
 
 
-@app.get("/debug/persist-dir")
-def debug_persist_dir():
-    """Temporary diagnostic, round 2 — the skill reappeared again even
-    after a fully controlled test with no possible interference. First
-    round's search apparently missed something. Cast a wider net this
-    time and also directly report what importlib.metadata.files()
-    returns for the exact package name right now, live.
-    """
-    if not os.path.isdir(PERSIST_DIR):
-        return {"exists": False}
-    entries = []
-    for root, dirs, files in os.walk(PERSIST_DIR):
-        for f in files:
-            entries.append(os.path.relpath(os.path.join(root, f), PERSIST_DIR))
-        for d in dirs:
-            entries.append(os.path.relpath(os.path.join(root, d), PERSIST_DIR) + "/ (dir)")
-
-    live_files = None
-    try:
-        f = importlib.metadata.files("ovos-skill-date-time")
-        live_files = [str(x) for x in f] if f else []
-    except importlib.metadata.PackageNotFoundError as exc:
-        live_files = f"PackageNotFoundError: {exc}"
-
-    return {
-        "exists": True,
-        "total_entries": len(entries),
-        "skill_dist_info_entries": [e for e in entries if "skill" in e.lower() and "date" in e.lower()],
-        "live_importlib_files_for_ovos_skill_date_time": live_files,
-    }
-
-
 @app.get("/catalog")
 def get_catalog():
     """Proxy the official, curated skill catalog — 36 skills as of the
@@ -255,9 +223,7 @@ def install_status(key: str):
 
 
 def _run_uninstall_job(job_key: str, package_name: str):
-    LOG.warning(f"UNINSTALL DEBUG: starting uninstall of package_name='{package_name}' for job_key='{job_key}'")
     ok, error = _direct_pip_uninstall(package_name)
-    LOG.warning(f"UNINSTALL DEBUG: finished, ok={ok}, error='{error}'")
     if ok:
         jobs[job_key] = {"status": "complete"}
     else:
@@ -294,7 +260,18 @@ def _find_installed_package(hint: str) -> str | None:
     catalog entry says ovos-skill-ovos-fallback-chatgpt, but it installs
     as skill-ovos-fallback-chatgpt). Normalized exact match first, then a
     unique-substring fallback, rather than trusting the hint literally.
+
+    Reloads importlib.metadata first — its internal finder cache can be
+    stale for packages that appeared via run.sh's restore-on-start copy
+    rather than a pip install run inside this process. Confirmed the
+    hard way: a real skill, definitely on disk and shown by `pip list`,
+    was invisible here without this, causing uninstall to fall back to a
+    guessed package name that doesn't exist — reporting success while
+    touching nothing.
     """
+    global importlib
+    importlib.metadata = importlib.reload(importlib.metadata)
+
     def norm(s: str) -> str:
         return s.lower().replace("_", "-").replace(" ", "-")
 
@@ -329,11 +306,8 @@ def _remove_persisted_package(package_name: str) -> None:
     try:
         files = importlib.metadata.files(package_name) or []
     except importlib.metadata.PackageNotFoundError:
-        LOG.warning(f"UNINSTALL DEBUG: _remove_persisted_package: PackageNotFoundError for '{package_name}'")
         return
-    LOG.warning(f"UNINSTALL DEBUG: _remove_persisted_package: found {len(files)} files for '{package_name}'")
     sp_dir = _site_packages_dir()
-    removed = 0
     for f in files:
         src = str(f.locate())
         try:
@@ -345,8 +319,6 @@ def _remove_persisted_package(package_name: str) -> None:
         target = os.path.join(PERSIST_DIR, rel)
         if os.path.isfile(target):
             os.remove(target)
-            removed += 1
-    LOG.warning(f"UNINSTALL DEBUG: _remove_persisted_package: removed {removed} persisted files for '{package_name}'")
 
 
 def _direct_pip_uninstall(package_name: str) -> tuple[bool, str]:
@@ -377,15 +349,10 @@ def _direct_pip_uninstall(package_name: str) -> tuple[bool, str]:
     # way, reporting success while silently uninstalling from the wrong
     # place, before switching to this.
     cmd = [sys.executable, "-m", "pip", "uninstall", "-y", "--break-system-packages", package_name]
-    LOG.warning(f"UNINSTALL DEBUG: running command: {cmd}")
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
     except subprocess.TimeoutExpired:
         return False, "pip uninstall timed out"
-
-    LOG.warning(f"UNINSTALL DEBUG: returncode={result.returncode}")
-    LOG.warning(f"UNINSTALL DEBUG: stdout={result.stdout}")
-    LOG.warning(f"UNINSTALL DEBUG: stderr={result.stderr}")
 
     if result.returncode != 0:
         return False, (result.stderr or result.stdout or "pip uninstall failed").strip()
