@@ -181,12 +181,47 @@ talks to the shared bus, has no idea where the skill physically lives): `"what t
 `ovos-core` never loaded this skill via its own entry-points/site-packages mechanism at all —
 proof that the skill-runtime split described above is not just plausible, it's already working.
 
-**What this was tested with, temporarily** (not the final shape): `ovos-skill-launcher` run
-manually via a temporary debug endpoint in `ovos-skills`'s `api.py`, not a real, permanent
-process manager. Confirms the *mechanism*; doesn't yet answer how a real "skills container"
-would manage multiple launched skill processes, restart a crashed one, or launch automatically
-on container start rather than via a manual debug call. That's the actual remaining build —
-this section is proof the foundation under it is solid.
+**The permanent process manager, built and confirmed working fully automatically.**
+`SkillProcessManager` (in `ovos-skills`'s `api.py`) replaced the manual debug endpoint used to
+first prove the mechanism above. Discovers installed skills via `importlib.metadata
+entry_points` (group `opm.skill`, falling back to the deprecated `ovos.plugin.skill`) rather
+than guessing from pip package names -- this gives the exact dotted `skill_id`
+`ovos-skill-launcher` needs *and* the real owning package name in one call, so install/uninstall
+can look up the right running process without fuzzy matching. Launches one
+`ovos-skill-launcher <skill_id>` subprocess per discovered skill on container start, hot-launches
+a newly-installed skill immediately (no restart needed), stops the right process before an
+uninstall removes its files, and a background monitor thread restarts a crashed process (capped
+at 5 attempts per skill, so a genuinely broken skill doesn't burn CPU in an infinite crash loop
+-- it just sits visibly dead in `GET /skills/running` for a human to notice).
+
+Confirmed fully automatically, not just via manual debug calls: restarted `ovos-skills` with
+four skills already installed from earlier testing (alerts, date-time, news, dictation) -- all
+four were discovered and launched with zero manual intervention (`GET /skills/running` showed
+all four `running: true` within seconds of container start). `ovos-core`'s `/ask` initially
+still timed out at this point ("no skill and no fallback matched") -- turned out to be a
+genuine, expected timing gap, not a bug: each launched skill process's own connection logic
+(`ovos_workshop.skill_launcher._connect_to_core`) polls `ovos-core` with `mycroft.skills.is_ready`
+on an *exponential backoff* (starting at 1s, capping at 60s) before it will actually load the
+skill, specifically to avoid hammering a still-starting core. Confirmed directly with a
+temporary debug endpoint that `ovos-core` was already answering `ready: true` when asked
+immediately -- the skill processes just hadn't hit their next retry yet. Waited roughly 40
+more seconds, no code changes, and `/ask` answered correctly. No fix needed here: this is
+`ovos-workshop`'s own, deliberate startup-order protection working as designed, not a defect --
+just something to expect and not mistake for a hang when testing a fresh container start.
+
+One real bug found and fixed along the way: skill processes were launched with
+`stdout=subprocess.PIPE`, which silently swallows a process's own log output (including startup
+errors) unless something actually reads from the pipe -- nothing did, unless the process had
+already died. Fixed to inherit this add-on's own stdout/stderr instead, so each skill's own
+logging now shows up in the normal HA add-on log view, which is what actually surfaced the
+`mycroft.skills.is_ready` polling above rather than leaving it invisible.
+
+**Still not built**: a `skill_id`-keyed way to tell *which* running skill answered a given
+`/ask` call apart from what the response already includes; per-skill log prefixing (right now
+all four launched skills' log lines interleave into one shared add-on log with no per-skill
+tag); and the curated two-tier model this whole mechanism is meant to serve (see "Direction
+settled on" above) -- this section proves the runtime foundation, not the curation layer on
+top of it.
 
 ### Scope: v1 (synchronous) vs. v2 (proactive)
 
