@@ -444,6 +444,17 @@ class InstallRequest(BaseModel):
     url: str
 
 
+@app.post("/debug/wipe-manifest")
+def debug_wipe_manifest():
+    """TEMPORARY -- clear manifest.json and all venvs for a clean retry."""
+    if os.path.isfile(MANIFEST_PATH):
+        os.remove(MANIFEST_PATH)
+    if os.path.isdir(VENV_ROOT):
+        for entry in os.listdir(VENV_ROOT):
+            shutil.rmtree(os.path.join(VENV_ROOT, entry), ignore_errors=True)
+    return {"status": "wiped"}
+
+
 @app.get("/health")
 def health():
     # No messagebus connection to report on anymore -- this add-on no
