@@ -294,18 +294,39 @@ would need to define, so the two ideas converge into one piece of work, not two.
 **Default installed skills.** Folded into "Skill runtime: the real design question" above —
 the curated tier's initial contents.
 
-**`ovos-config autoconfigure`-style setup choices in `ha-ovos-integration`'s config flow.**
-OVOS's own `ovos-config` (v0.3.0+) ships an `autoconfigure` utility that picks sensible
-TTS/STT plugin and voice defaults from language + an offline/online + male/female choice,
-sourced from the community-maintained
-[`OpenVoiceOS/lang_configs`](https://github.com/OpenVoiceOS/lang_configs) data. Right now,
-`ha-ovos-integration`'s config flow pre-fills language/location/units from HA's own settings
-but leaves TTS/STT plugin choice entirely to each Wyoming add-on's own, separate config —
-no cross-add-on "pick offline vs. online, male vs. female" step exists. Adding one would mean
-either shelling out to `ovos-config`'s own CLI (adds a dependency inside HA Core's Python
-environment, unconfirmed whether that's clean) or reading `lang_configs`' underlying data
-directly and replicating the selection logic ourselves (more control, more to maintain).
-Neither approach attempted yet — worth spiking properly rather than guessing which is cleaner.
+**`ovos-config autoconfigure`-style setup choices -- clarified: this is Wyoming add-ons'
+territory, not `ovos-core`'s.** `autoconfigure`'s specific job is picking TTS/STT plugin +
+voice (male/female) defaults from language + an offline/online choice -- audio I/O plugin
+selection, which is what `ovos-wyoming-tts`/`-stt`/`-wakeword` each already have their own
+`plugin`/`plugin_config` options for (currently free-text, no smart defaults). `ovos-core`
+does no audio I/O at all (intent matching and skill execution only); its own config needs
+(language, units, pipeline order) are already covered by the existing shared `mycroft.conf`
+convention plus its own explicit `run.sh` setup, not by anything `autoconfigure`-shaped.
+
+Where this actually belongs: `ha-ovos-integration`'s config flow. Confirmed current state by
+reading the actual code, not assuming: language, system unit, and latitude/longitude are
+*already* editable after initial setup, live, via `text.language`, `select.system_unit`, and
+`number.latitude`/`number.longitude` entities (`text.py`/`select.py`/`number.py`), all backed
+by the same shared-config coordinator -- pre-filled from HA's own settings but freely
+overridable, both at first setup and any time after. Only `timezone` is missing this same
+treatment (set once at initial config flow, no entity to change it later) -- a small, easy gap
+to close, not a new mechanism to build.
+
+The genuinely unbuilt piece: an `autoconfigure`-style *plugin picker*. Each Wyoming add-on's
+`plugin`/`plugin_config` options are free-text today -- technically already "possible to use
+any TTS/STT plugin, local or online", but only for someone who already knows the exact
+package name and its config JSON. Building the guided version means: a UI step (offline/online,
+male/female, using the language already set) that resolves to a real plugin name + config,
+written into the *right add-on's own Supervisor options* (not the shared `mycroft.conf` --
+plugin choice is a per-add-on `options.plugin` value, a different mechanism from everything
+else this integration writes so far). Two ways to get the actual plugin/language selection
+data: shell out to `ovos-config`'s own CLI (a new dependency inside HA Core's Python
+environment, unconfirmed whether that's clean) or read `lang_configs`' underlying data
+directly and replicate the selection logic (more control, more to maintain). Writing the
+result also needs a new capability this integration doesn't have yet: calling Supervisor's
+own `/addons/{slug}/options` API from HA Core's side (requires `hassio_api: true` in the
+integration's own manifest) -- everything built so far only reads/writes the shared
+`mycroft.conf`, never another add-on's own options.
 
 ## Original 3-repo plan (superseded, kept for history)
 
