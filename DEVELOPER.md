@@ -100,21 +100,25 @@ Genuinely not meaningful until `ovos-core` exists — an installed skill is iner
 now, no matter how good it is, since nothing loads or runs it. Worth deciding once the runtime
 is real, not before.
 
-### `ovos-core` add-on: skeleton scaffolded, sandbox spike confirmed the mechanism works
+### `ovos-core` add-on: built, deployed, working end-to-end on real hardware
 
-`config.yaml` exists (`ovos-core/`); `Dockerfile`/`run.sh`/`api.py` don't yet. Before writing
-those, a full sandbox spike confirmed the whole chain works end-to-end — see `ovos-core/DOCS.md`
-for the complete writeup (exact install recipe copied from OVOS's own official Docker image,
-the `swig2.0` build quirk, the ~90s first-boot model-download caveat that initially looked like
-a stuck upstream bug but wasn't, and the exact bus messages for the synchronous Q&A mechanism).
-Headline result, confirmed for real, not assumed: sent `"what time is it"` in, got back
-`"It is ten twenty two"` from a genuinely running `ovos-skill-date-time`, computed correctly.
+Confirmed for real, not assumed: `POST /ask {"utterance": "what time is it"}` →
+`"It is eight twenty one"` from a genuinely running `ovos-skill-date-time`, on Alpine (same
+base as every other add-on here), in under a second. Getting there took a long, genuinely
+twisty investigation — see `ovos-core/DOCS.md`'s "The investigation" section for the full
+trail, including two reasonable-looking fixes (a Debian base image switch, blacklisting
+network-dependent pipelines) that turned out not to be the actual cause, kept anyway on their
+own merits. Short version: what looked like an infinite hang was actually `padatious` (the
+default, C++/SWIG-compiled intent matcher) genuinely taking 80-90+ seconds per match on this
+specific weak hardware — not a bug. Fixed by switching the active matcher to `padacioso`, a
+lightweight pure-Python drop-in already installed but never configured into
+`ovos-config`'s own default `intents.pipeline` list.
 
-Also considered mid-spike: an HA-aware PHAL plugin, raised as a possible fix for what looked
-like stuck skill loading (PHAL normally reports network/internet status to `ovos-core`). Turned
-out not to be the actual cause, but the idea itself — giving OVOS awareness of HA, or exposing
-HA entities as OVOS "hardware" concepts — is separate and self-contained, worth keeping for
-later, not evaluated further this session.
+Also considered mid-investigation: an HA-aware PHAL plugin, raised as a possible fix for what
+looked like stuck skill loading (PHAL normally reports network/internet status to
+`ovos-core`). Turned out not to be the actual cause of anything encountered, but the idea
+itself — giving OVOS awareness of HA, or exposing HA entities as OVOS "hardware" concepts —
+is separate and self-contained, worth keeping for later.
 
 ## Original 3-repo plan (superseded, kept for history)
 
@@ -124,4 +128,4 @@ skills externally, and a deferred `haos-ovos-skills` for actually running them. 
 standalone browse page redundant, and `haos-ovos-skills` was un-deferred, built, and then merged
 into this repo as the `ovos-skills` add-on rather than staying separate — see this repo's own
 commit history and `ovos-skills/DOCS.md` for the full reasoning. Neither ran skills live; that's
-the `ovos-core` add-on described above, not yet built.
+the `ovos-core` add-on described above, now built and confirmed working.
