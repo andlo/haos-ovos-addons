@@ -147,6 +147,47 @@ idea above (the curated tier's skill list is exactly what that catalog would nee
 and "default installed skills" (the default tier's initial contents). Needs its own dedicated
 design session before building anything — this paragraph is the direction, not a spec.
 
+### The core mechanism: proven for real, end to end
+
+Everything above was direction and reasoning. This part is confirmed, on real hardware, not
+assumed: **a skill can run in a genuinely separate container from `ovos-core` and still answer
+questions through it**, with the skill's own files never present in `ovos-core`'s
+`site-packages` at all.
+
+**The address fix that made it possible.** `ovos-messagebus` (in `ovos-core`), `ovos-skill-installer`,
+and `ovos-skill-launcher` all read `websocket.host` from the same shared `Configuration()` —
+confirmed by reading all three source files directly, none accept an external override.
+`"0.0.0.0"` is a valid bind address but a meaningless connect target for another container.
+Fix: `ovos-core`'s `run.sh` now writes its own real hostname (`b8e040e3-ovos-core`) as
+`websocket.host` instead of `0.0.0.0` — one value, correct for both bind (within its own
+container) and connect (from anywhere else). Confirmed working in both directions: `ovos-core`'s
+own `/health` stayed green after the change (bind still works), and a brand new
+`MessageBusClient(host="b8e040e3-ovos-core", port=8181)` opened from *inside `ovos-skills`'s
+own container* connected successfully (connect works too, genuinely cross-container).
+
+**The knock-on fix this required**: `ovos-skills` was still starting its *own* private
+`ovos-messagebus` — once the shared config pointed at `ovos-core`'s hostname, that local
+process tried to bind to an address that doesn't exist inside its own container
+(`OSError: [Errno 99] Address not available`). Removed entirely; `ovos-skills` now just waits
+for the *shared* bus to accept connections before starting anything.
+
+**The end-to-end proof**: installed `ovos-skill-date-time` via `ovos-skills`'s normal
+`/skills/install` API (landing in `ovos-skills`'s own `site-packages`, never copied anywhere).
+Ran `ovos-skill-launcher ovos-skill-date-time.openvoiceos` as a plain subprocess *inside
+`ovos-skills`'s own container* — connects to the shared bus via the same `Configuration()`
+mechanism, registers its intents there. Then called `ovos-core`'s own `/ask` (which only ever
+talks to the shared bus, has no idea where the skill physically lives): `"what time is it"` →
+`"Currently nine thirty three"`, correctly computed, correctly routed, correctly answered.
+`ovos-core` never loaded this skill via its own entry-points/site-packages mechanism at all —
+proof that the skill-runtime split described above is not just plausible, it's already working.
+
+**What this was tested with, temporarily** (not the final shape): `ovos-skill-launcher` run
+manually via a temporary debug endpoint in `ovos-skills`'s `api.py`, not a real, permanent
+process manager. Confirms the *mechanism*; doesn't yet answer how a real "skills container"
+would manage multiple launched skill processes, restart a crashed one, or launch automatically
+on container start rather than via a manual debug call. That's the actual remaining build —
+this section is proof the foundation under it is solid.
+
 ### Scope: v1 (synchronous) vs. v2 (proactive)
 
 - **v1** — a skill can *answer* a direct question through the synchronous HTTP endpoint.
