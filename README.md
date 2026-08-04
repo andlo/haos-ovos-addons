@@ -18,7 +18,10 @@ existing, already-maintained OVOS component — not new, unproven code.
 | `ovos-wyoming-stt` | STT slot in the Assist pipeline | wyoming-ovos-stt |
 | `ovos-wyoming-wakeword` | Wakeword slot in the Assist pipeline | wyoming-ovos-wakeword |
 | `ovos-persona` | Conversation agent (Ollama-compatible) | [ovos-persona-server](https://github.com/OpenVoiceOS/ovos-persona-server) |
-| `ovos-skill-config` | Graphical configuration of installed skills | [ovos-skill-config-tool](https://github.com/OscillateLabsLLC/ovos-skill-config-tool) |
+
+`ovos-skill-config` (wrapping [ovos-skill-config-tool](https://github.com/OscillateLabsLLC/ovos-skill-config-tool))
+was planned but never built — superseded by config subentries in
+[ha-ovos-integration](https://github.com/andlo/ha-ovos-integration) instead.
 
 ## Why
 
@@ -28,21 +31,22 @@ they just need this packaging to show up in HA's own world.
 
 ## Status
 
-No add-ons are finished yet. See [DEVELOPER.md](DEVELOPER.md) in this repo for the overall
-architecture and decisions behind the project.
+All four add-ons build, run, and are discovered by HA on real hardware — see each add-on's
+own `DOCS.md` for exactly what's verified and what isn't (e.g. persona's default answers are
+weak without a real LLM solver; TTS/STT audio quality hasn't been human-verified beyond
+plumbing).
 
 ## Related repos
-- [ha-ovos-integration](https://github.com/andlo/ha-ovos-integration) — HA integration for shared config & per-skill settings
 
-- [ovos-skill-browser](https://github.com/andlo/ovos-skill-browser) — web-based skill store, runs outside HAOS
-- [haos-ovos-skills](https://github.com/andlo/haos-ovos-skills) — deferred: skills directly inside a single HAOS container
+- [ha-ovos-integration](https://github.com/andlo/ha-ovos-integration) — HA integration for shared config & per-skill management
+- [haos-ovos-skills](https://github.com/andlo/haos-ovos-skills) — skill install/management API, called by ha-ovos-integration
 
 ## About
 
 Part of the **HA-OVOS** project: making it easy for a Home Assistant OS user to discover and
 use OpenVoiceOS, through interfaces that feel native to HAOS. This repo builds the actual
-Supervisor add-ons — see the other repos for the web-based skill browser and the deferred
-full-skills add-on.
+Supervisor add-ons — see [ha-ovos-integration](https://github.com/andlo/ha-ovos-integration)
+for the HA-native configuration/skill-management layer built on top.
 
 ## License
 
