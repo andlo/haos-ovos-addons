@@ -127,11 +127,33 @@ def _create_venv(venv_dir: str) -> tuple[bool, str]:
         return False, "venv creation timed out"
 
 
+_ARCHIVE_EXTENSIONS = (".whl", ".tar.gz", ".zip", ".tar.bz2")
+
+
+def _pip_installable(source: str) -> str:
+    """A bare repo URL (e.g. "https://github.com/OpenVoiceOS/skill-x",
+    the catalog's own "source" field convention) is NOT directly
+    pip-installable -- pip treats a plain https:// URL as a direct
+    archive download, and a GitHub repo *page* URL returns HTML, not an
+    archive ("Cannot determine archive format", confirmed for real).
+    Needs the "git+" scheme prefix so pip clones it as a VCS source
+    instead. Left alone if it's already prefixed, already a recognized
+    archive URL, or looks like a plain PyPI package name (no scheme at
+    all).
+    """
+    if source.startswith(("git+", "git@")) or "://" not in source:
+        return source
+    if source.endswith(_ARCHIVE_EXTENSIONS):
+        return source
+    return f"git+{source}"
+
+
 def _venv_pip_install(venv_dir: str, source: str) -> tuple[bool, str]:
     pip_bin = os.path.join(venv_dir, "bin", "pip")
+    target = _pip_installable(source)
     try:
         result = subprocess.run(
-            [pip_bin, "install", "--no-input", source],
+            [pip_bin, "install", "--no-input", target],
             capture_output=True, text=True, timeout=INSTALL_TIMEOUT,
         )
     except subprocess.TimeoutExpired:
