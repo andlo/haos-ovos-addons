@@ -95,6 +95,38 @@ def debug_mycroft_conf():
     return {"exists": True, "path": path, "content": content}
 
 
+@app.get("/debug/network")
+def debug_network():
+    """TEMPORARY: test whether a DNS lookup or outbound connection HANGS
+    (rather than failing fast) from inside this container -- unlike the
+    already-ruled-out metrics-upload daemon thread, a synchronous
+    blocking lookup somewhere earlier in handle_utterance (before the
+    'match' log line) would explain the hang without ever logging an
+    error. Each check has its own explicit, short timeout so a real hang
+    here shows up as this endpoint itself timing out, not a graceful
+    per-check failure.
+    """
+    import socket
+    import time as _time
+    results = {}
+
+    try:
+        with open("/etc/resolv.conf") as f:
+            results["resolv_conf"] = f.read()
+    except Exception as exc:
+        results["resolv_conf"] = f"<error: {exc}>"
+
+    for host in ["metrics.tigregotico.pt", "openvoiceos.github.io", "8.8.8.8"]:
+        start = _time.monotonic()
+        try:
+            socket.setdefaulttimeout(5)
+            addr = socket.gethostbyname(host)
+            results[host] = {"resolved": addr, "seconds": round(_time.monotonic() - start, 2)}
+        except Exception as exc:
+            results[host] = {"error": str(exc), "seconds": round(_time.monotonic() - start, 2)}
+    return results
+
+
 @app.get("/debug/versions")
 def debug_versions():
     """TEMPORARY: send_complete_intent_failure references OVOS-PIPELINE-1
