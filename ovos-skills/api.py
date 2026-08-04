@@ -237,6 +237,33 @@ def health():
     return {"bus_connected": bool(bus and bus.connected_event.is_set())}
 
 
+@app.get("/debug/find-package")
+def debug_find_package(hint: str):
+    """TEMPORARY -- diagnosing why a genuinely-installed skill isn't
+    discovered via entry_points, see DEVELOPER.md.
+    """
+    import importlib.metadata
+    matches = [
+        d.metadata["Name"] for d in importlib.metadata.distributions()
+        if d.metadata["Name"] and hint.lower() in d.metadata["Name"].lower()
+    ]
+    fs_matches = [f for f in os.listdir(_site_packages_dir()) if hint.lower() in f.lower()]
+    persist_matches = []
+    if os.path.isdir(PERSIST_DIR):
+        persist_matches = [f for f in os.listdir(PERSIST_DIR) if hint.lower() in f.lower()]
+    ep_groups = {}
+    for d in importlib.metadata.distributions():
+        name = d.metadata["Name"] or ""
+        if hint.lower() in name.lower():
+            ep_groups[name] = [{"group": ep.group, "name": ep.name} for ep in d.entry_points]
+    return {
+        "importlib_matches": matches,
+        "site_packages_matches": fs_matches,
+        "persist_dir_matches": persist_matches,
+        "entry_points_by_match": ep_groups,
+    }
+
+
 @app.get("/skills/running")
 def running_skills():
     """Status of every skill process this container is currently
