@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import importlib.metadata
 import json
+import logging
 import os
+import shutil
+import site
 import subprocess
 import threading
 from contextlib import asynccontextmanager
@@ -20,6 +23,16 @@ import requests
 from fastapi import Body, FastAPI, HTTPException
 from pydantic import BaseModel
 from ovos_bus_client import MessageBusClient, Message
+
+LOG = logging.getLogger("ovos-skills-api")
+
+# pip installs land in the container's own filesystem layer, which does
+# NOT survive an add-on rebuild/update — confirmed on real hardware: a
+# skill installed, then wiped clean by the next version bump. After every
+# successful install, newly-added package files get copied here (on the
+# /share volume, which does persist); run.sh copies them back into
+# site-packages on every container start, before anything else runs.
+PERSIST_DIR = "/share/ovos-skills/persisted-packages"
 
 CATALOG_URL = "https://openvoiceos.github.io/OVOS-skills-store/skills.json"
 BUS_TIMEOUT = 300  # generous — this now runs in a background thread, not
@@ -124,13 +137,65 @@ def list_installed_skills():
 
 
 def _run_job(job_key: str, msg_type: str, data: dict, ok_type: str, fail_type: str):
+    before = _installed_names() if msg_type == "ovos.skills.install" else None
+
     result = emit_and_wait_either(msg_type, data, ok_type, fail_type, timeout=BUS_TIMEOUT)
     if result is None:
         jobs[job_key] = {"status": "failed", "error": "No reply from SkillsStore (timeout)"}
-    elif result["ok"]:
-        jobs[job_key] = {"status": "complete"}
-    else:
+        return
+    if not result["ok"]:
         jobs[job_key] = {"status": "failed", "error": result["data"].get("error", "unknown error")}
+        return
+
+    jobs[job_key] = {"status": "complete"}
+    if before is not None:
+        try:
+            persisted = _persist_new_packages(before)
+            LOG.info(f"Persisted {len(persisted)} newly-installed package(s) to {PERSIST_DIR}: {persisted}")
+        except Exception as exc:
+            # A persistence failure shouldn't make a successful install
+            # look like it failed to the caller — the skill genuinely is
+            # installed and usable right now, it just won't survive a
+            # future add-on rebuild. Log loudly, don't flip the job status.
+            LOG.error(f"Failed to persist newly-installed packages: {exc}")
+
+
+def _site_packages_dir() -> str:
+    dirs = site.getsitepackages()
+    return dirs[0] if dirs else site.getusersitepackages()
+
+
+def _installed_names() -> set[str]:
+    return {d.metadata["Name"] for d in importlib.metadata.distributions() if d.metadata["Name"]}
+
+
+def _persist_new_packages(before: set[str]) -> list[str]:
+    """Copy every file belonging to each newly-installed package (the
+    skill itself, plus any new transitive dependencies it pulled in) into
+    PERSIST_DIR, preserving their path relative to site-packages, so
+    run.sh can copy them straight back on the next container start.
+    """
+    importlib.metadata = importlib.reload(importlib.metadata)  # pick up new dist-info
+    new_names = _installed_names() - before
+    sp_dir = _site_packages_dir()
+    persisted = []
+    for name in new_names:
+        try:
+            files = importlib.metadata.files(name) or []
+        except importlib.metadata.PackageNotFoundError:
+            continue
+        for f in files:
+            src = str(f.locate())
+            if not os.path.isfile(src):
+                continue
+            rel = os.path.relpath(src, sp_dir)
+            if rel.startswith(".."):
+                continue  # not actually under site-packages, e.g. a script in bin/
+            dst = os.path.join(PERSIST_DIR, rel)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copy2(src, dst)
+        persisted.append(name)
+    return persisted
 
 
 @app.post("/skills/install")

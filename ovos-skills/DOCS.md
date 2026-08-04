@@ -67,12 +67,31 @@ in HA.
 - `GET /skills` (list installed) is a naming-convention heuristic — confirmed working against
   a real installed skill (`ovos-skill-date-time`), but still just a heuristic, not a
   guaranteed-correct mechanism for skills that don't follow the naming convention.
-- **Skills installed at runtime don't survive an add-on rebuild/update.** Confirmed on
-  hardware: updating the add-on to a new version wiped a previously-installed skill, because
-  `pip install` writes into the container's own filesystem layer, not a mapped volume. Not
-  yet fixed — a real gap for anyone who updates this add-on after installing skills.
 - Explicitly does not make skills respond to voice queries — that needs OVOS's
   messagebus/HiveMind bridged into Assist, which doesn't exist yet. This add-on only makes
   skills installable and configurable.
 - Multiple skills share one Python environment (unlike `ovos-docker`'s one-container-per-skill
   model) — a deliberately accepted dependency-conflict risk, not a solved problem.
+
+## Skills now survive an add-on rebuild/update
+
+Was a known gap; fixed. `pip install` writes into the container's own filesystem layer, which
+does not survive a rebuild — confirmed on real hardware: an installed skill wiped clean by the
+next version bump.
+
+Fixed with a before/after `pip list` diff, not a pip-redirection trick. `PIP_TARGET`/
+`PYTHONPATH` was tried first and rejected after directly testing it: it broke pip's own build
+isolation for new installs (`pip subprocess to install build dependencies did not run
+successfully`), and packages installed that way weren't found by `importlib.metadata` at all
+even with the target directory added to `sys.path` — which would have silently broken the
+settingsmeta/settings endpoints built earlier, since they depend on it.
+
+What actually works, verified end-to-end in a clean venv (install → diff → persist → wipe →
+restore → real import) before touching hardware: after every successful install, diff
+`importlib.metadata`'s package list against a snapshot taken just before, copy every file
+belonging to each newly-added package (the skill itself, plus any new transitive dependencies)
+into `/share/ovos-skills/persisted-packages/`, preserving their path relative to
+site-packages. `run.sh` copies everything back into the real site-packages on every container
+start, before `ovos-messagebus`/`SkillsStore`/the API start. Packages already baked into the
+image (recognized because they were present *before* the diff) are correctly never
+re-persisted or re-copied — only what a skill install actually adds.

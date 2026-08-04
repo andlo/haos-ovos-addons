@@ -27,6 +27,18 @@ jq --argjson allow "$([ "${ALLOW_PIP}" = "true" ] && echo true || echo false)" \
   '. + {skills: ((.skills // {}) + {installer: (((.skills // {}).installer // {}) + {allow_pip: $allow, break_system_packages: true, constraints: $constraints})})}' \
   "${CONF_FILE}" > "${CONF_FILE}.tmp" && mv "${CONF_FILE}.tmp" "${CONF_FILE}"
 
+# Restore any skills persisted from a previous container before anything
+# else starts — pip installs otherwise land in this container's own
+# filesystem layer and are wiped on the next rebuild/update, confirmed on
+# real hardware. api.py copies newly-installed package files into
+# PERSIST_DIR after every successful install; this is the other half.
+PERSIST_DIR="/share/ovos-skills/persisted-packages"
+if [ -d "${PERSIST_DIR}" ] && [ -n "$(ls -A "${PERSIST_DIR}" 2>/dev/null)" ]; then
+  SITE_PACKAGES=$(python3 -c "import site; print(site.getsitepackages()[0])")
+  bashio::log.info "Restoring persisted skill packages from ${PERSIST_DIR} into ${SITE_PACKAGES}"
+  cp -a "${PERSIST_DIR}/." "${SITE_PACKAGES}/"
+fi
+
 bashio::log.info "Starting internal ovos-messagebus"
 ovos-messagebus &
 MB_PID=$!
