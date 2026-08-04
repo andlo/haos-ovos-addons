@@ -72,7 +72,9 @@ in HA.
   Not usable from our side yet — same PyPI-lag problem as uninstall below, since it needs a
   new `ovos-core` release to reach us.
 - **`DELETE /skills/{id}` bypasses `SkillsStore` entirely now** — see the section below for
-  why and how. Fixed, but deliberately not the long-term destination.
+  why, and for the four real bugs (not just one) it took to actually get this working
+  end-to-end, confirmed on real hardware across multiple rebuild cycles. Fixed, but
+  deliberately not the long-term destination.
 - `GET /skills` (list installed) is a naming-convention heuristic — confirmed working against
   a real installed skill (`ovos-skill-date-time`), but still just a heuristic, not a
   guaranteed-correct mechanism for skills that don't follow the naming convention.
@@ -111,6 +113,14 @@ restore step on the next start found real files to copy). Likely a `logging` con
 gap — this logger was never explicitly wired to a handler/level, so it may be silently
 swallowed rather than actually failing. Worth a quick look, not urgent.
 
+**Known remaining fragility**: `get_settingsmeta`'s own `importlib.metadata.files(real_name)`
+call (after resolving the name via the now-fixed `_find_installed_package`) still uses the
+same `importlib.metadata` approach proven unreliable for uninstall. It tested successfully
+earlier, but that may have been a timing coincidence (tested shortly after a fresh container
+start) rather than a guarantee — hasn't been re-verified against a package that's been sitting
+restored for a while, the way the uninstall bug only showed up after that. Worth switching to
+the same dist-info-scanning approach if it turns out to matter.
+
 ## `DELETE /skills/{id}` now works — via a local bridge, not SkillsStore
 
 Was documented as broken (upstream stub); fixed, but deliberately as a temporary bridge, not
@@ -121,7 +131,44 @@ that no PR against this add-on could resolve. So `DELETE` now bypasses `SkillsSt
 messagebus entirely and runs `pip uninstall` directly — same approach as the `/skills` list
 and the persist-on-install logic already use.
 
-Two things worth being explicit about, both confirmed by testing before trusting them:
+This took three separate, genuinely confirmed bugs to actually get working end-to-end —
+worth recording all three, since each one looked fixed after the previous one but wasn't:
+
+1. **Wrong package name.** `_find_installed_package()` originally used
+   `importlib.metadata.distributions()` to resolve the catalog's `package_name` hint to the
+   real installed name. For a package restored via `run.sh`'s file-copy (rather than a `pip
+   install` run inside this process), that call returned it not being found at all —
+   confirmed directly via logging: 85 packages seen, the target skill genuinely on disk and
+   shown by `pip list`, not among them. Uninstall silently fell back to a guessed,
+   nonexistent package name, and `pip uninstall` reported success ("Skipping ... as it is not
+   installed") while touching nothing.
+2. **`reload()` alone wasn't enough, `invalidate_caches()` wasn't either.** Tried both
+   `importlib.reload(importlib.metadata)` and `importlib.invalidate_caches()` before that
+   call — same 85-packages-seen, target-absent result, confirmed again via logging. Whatever
+   the exact cause, `importlib.metadata` run inside this long-running process is not
+   trustworthy for packages that appeared via file-copy. Fixed by switching
+   `_find_installed_package()` to a fresh `pip list` subprocess instead — the same mechanism
+   `/skills` already used successfully.
+3. **`no RECORD file was found`.** With the right package name finally in hand, `pip
+   uninstall` itself failed — the persist/restore cycle doesn't reliably keep a package's
+   `RECORD` file intact. Added a fallback that finds the package's dist-info directory
+   directly (PEP 503 normalized-name match) and its module(s) via `top_level.txt`, deleting
+   both without needing `RECORD` at all.
+4. **Found on top of all that**: `_remove_persisted_package()` (the PERSIST_DIR-cleanup half,
+   separate from removing the package from live site-packages) still used the same unreliable
+   `importlib.metadata.files()` approach bug #1 already disproved — just in a different
+   function I'd missed. It silently removed nothing from `PERSIST_DIR`, so the "uninstalled"
+   skill reappeared on the very next rebuild. Confirmed this exact failure on real hardware
+   (uninstalled, verified gone, forced a rebuild, it was back), then consolidated both
+   site-packages and `PERSIST_DIR` removal into one shared, dist-info-scanning function so
+   there's only one mechanism to get right, not two silently-different ones.
+
+**Final verification, on real hardware, not a sandbox**: uninstalled `ovos-skill-date-time`,
+confirmed gone from `/skills`, forced a genuine rebuild (version bump + Supervisor update),
+confirmed it stayed gone. Repeated once more after the `PERSIST_DIR` fix specifically, since
+bug #4 was the one that had passed every earlier check right up until a rebuild.
+
+Two more things confirmed by testing before trusting them:
 
 - **Protected packages.** Mirrors `SkillsStore`'s own hardcoded fallback list
   (`ovos-core`, `ovos-utils`, `ovos-plugin-manager`, `ovos-config`, `ovos-bus-client`,
@@ -129,17 +176,11 @@ Two things worth being explicit about, both confirmed by testing before trusting
   That file is deliberately empty (see the stale-constraints fix above), and `SkillsStore`
   reads protected packages from that *same* file, so reusing it here would have silently
   disabled protection entirely. Confirmed: attempting to uninstall `ovos-core` is refused.
-- **`sys.executable -m pip`, not a bare `pip`.** Found the hard way, not by reasoning about
-  it: a bare `["pip", "uninstall", ...]` reported success while silently targeting a
-  *different* Python's pip than the one actually running the add-on — `pip show` afterward
-  still showed the package installed. Switched to `[sys.executable, "-m", "pip", ...]`
-  (matching `SkillsStore`'s own approach) and reproduced the exact same scenario with a
-  genuinely confirmed removal (`pip show` then correctly reports "not found"). Also fixed the
-  same latent issue in the `/skills` list endpoint, which had the same bare-`pip` pattern.
-
-Persisted package files (see above) are removed too, before the actual pip uninstall runs —
-otherwise an uninstalled skill would silently reappear on the next container restart via
-`run.sh`'s own restore step.
+- **`sys.executable -m pip`, not a bare `pip`.** A bare `["pip", "uninstall", ...]` reported
+  success while silently targeting a *different* Python's pip than the one actually running
+  the add-on — `pip show` afterward still showed the package installed. Switched to
+  `[sys.executable, "-m", "pip", ...]` everywhere (matching `SkillsStore`'s own approach),
+  including the `/skills` list endpoint, which had the same bare-`pip` pattern.
 
 **Revisit once upstream catches up**: prefer switching back to calling `SkillsStore`'s real
 uninstall over maintaining this bridge indefinitely, once a PyPI release resolves the
