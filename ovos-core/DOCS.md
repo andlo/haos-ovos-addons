@@ -241,27 +241,36 @@ fallback-skill cascade (`ovos-skill-fallback-chatgpt`, `ovos-skill-fallback-unkn
 handle "nothing matched" cases without us building custom routing logic, per the
 `DEVELOPER.md` architecture note, but that specifically hasn't been tested yet.
 
-## Considered during the spike: an HA-aware PHAL plugin
+## Future idea: an HA-aware PHAL plugin (revised, more concrete)
 
-Raised as a possible fix for what looked like a stuck skill-loading process (PHAL normally
-reports network/internet connectivity status to `ovos-core`). Turned out not to be the actual
-cause — the real blocker was first-boot model downloads, unrelated to network/internet
-*status* reporting. The idea itself is still worth keeping: a PHAL plugin giving OVOS
-awareness of HA (exposing HA entities as OVOS "hardware" concepts, or the reverse) is a
-genuinely separate, self-contained idea from this add-on's core purpose, not evaluated further
-this session.
+First raised mid-investigation as a possible fix for what looked like stuck skill loading
+(PHAL normally reports network/internet connectivity status to `ovos-core`) — turned out not
+to be the actual cause of anything encountered that night, but the idea itself was worth
+refining rather than dropping.
+
+**Not**: `ha-ovos-integration` talking to a standard, unmodified PHAL instance. PHAL is built
+to give OVOS awareness of *its own physical platform* — LED rings, physical buttons, volume
+mixers, wifi setup UI, device pairing — the things a real OVOS device (a Mark 1/2, a Pi with a
+speaker) manages itself. In this project's architecture, HA already owns almost everything
+PHAL would normally cover: HA knows its own network status, HA's own media players/Assist
+handle volume and playback, HA's satellite entities or the Wyoming-wakeword layer handle mic
+mute. Wiring the integration to a stock PHAL would mostly duplicate state HA already owns —
+two systems both believing they're authoritative over the same thing.
+
+**Instead**: a **custom PHAL plugin running on the `ovos-core` side**, exposing real HA state
+to OVOS skills through PHAL's own existing, standardized plugin interface — something skills
+already know how to use, no new API to invent per skill. Concretely: a skill asking "is it
+dark outside" could read a HA lux/sun sensor through this PHAL plugin instead of every skill
+needing its own bespoke HA API client; OVOS's own "do I have network" status could just always
+reflect HA's own, already-known state instead of OVOS trying to detect it independently.
+
+This is a clean, self-contained extension of the architecture already built here (`ovos-core`
+as the skill runtime) rather than something that touches `ha-ovos-integration` at all. Worth
+picking up once more skills are installed and a real need for HA-state-aware skills shows up —
+not before, since it's speculative without a concrete skill that needs it yet.
 
 ## Not yet done
 
-- **Remove the temporary debug endpoints from `api.py`** (`/debug/skill-files`,
-  `/debug/mycroft-conf`, `/debug/ask-verbose`, `/debug/processes`, `/debug/versions`,
-  `/debug/network`) — the investigation is resolved, `/ask` confirmed working end-to-end, so
-  these have served their purpose. Clean up next session.
-- **Lower `ASK_TIMEOUT` back down from 150s.** It was raised during the investigation on the
-  (wrong) assumption padatious's 90s was the expected cost; now that padacioso is the actual
-  matcher and answers in under a second, 150s is far more headroom than needed — pick
-  something more realistic (a few seconds) once confirmed stable across a few more test
-  utterances.
 - **The shared-bus binding (`websocket.host: 0.0.0.0`) is unverified for real
   container-to-container traffic.** `run.sh` sets it, reasoning from `ovos-skills` never
   needing to (its bus is deliberately private, defaults are enough there) — but nothing so far

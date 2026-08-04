@@ -118,7 +118,52 @@ Also considered mid-investigation: an HA-aware PHAL plugin, raised as a possible
 looked like stuck skill loading (PHAL normally reports network/internet status to
 `ovos-core`). Turned out not to be the actual cause of anything encountered, but the idea
 itself — giving OVOS awareness of HA, or exposing HA entities as OVOS "hardware" concepts —
-is separate and self-contained, worth keeping for later.
+is separate and self-contained, worth keeping for later. Revised into something more concrete
+in `ovos-core/DOCS.md`'s own "Future idea" section: not `ha-ovos-integration` talking to a
+stock PHAL (HA already owns nearly everything PHAL would normally manage — network status,
+volume, mic mute — so that would mostly duplicate state), but a **custom PHAL plugin on the
+`ovos-core` side** exposing real HA state (a lux sensor, a door sensor) to skills through
+PHAL's own existing plugin interface. Speculative until a concrete skill needs it.
+
+### Three more forward-looking ideas, not yet acted on
+
+**A self-hosted, curated skill catalog.** `ovos-skills`' `/catalog` endpoint currently proxies
+OVOS's own official `skills.json` feed directly — no filtering, no vetting. The idea: fork
+that feed (same move already made once for `ovos-skill-browser`, later archived once config
+subentries made a standalone browse page redundant — see "Original 3-repo plan" below) and
+maintain a curated subset, or an added `verified_haos: true`/`false` flag per entry, covering
+only skills actually confirmed to work well in *this* environment (no GUI dependency, no
+assumption of a physical mic/speaker, no skill that needs hardware this project doesn't have).
+Real tradeoff, not a free win: a fork needs active syncing against upstream or it silently
+goes stale and stops offering skills the community adds later — this is a genuine ongoing
+maintenance commitment, not a one-time fork-and-forget. Worth doing once there's a real backlog
+of skills confirmed to behave badly in this environment specifically (worth curating *against*),
+not preemptively.
+
+**Default installed skills.** Raised earlier this session and correctly deferred at the time —
+an installed skill was inert either way, since nothing loaded or ran it. Now that `ovos-core`
+genuinely runs skills (confirmed working end-to-end), this is worth revisiting for real. Natural
+approach: follow OVOS's own `ovos-installer` default-skill list rather than inventing one from
+scratch — same "copy the official convention" pattern used for the install recipe itself. Where
+this should live is an open question, not yet decided: `ovos-skills` already has the
+persist/restore mechanism a set of always-present skills would need to survive rebuilds, which
+argues for building it there rather than in `ovos-core` — but that's contingent on the
+still-unbuilt shared-bus connection between the two (see "Hot install" above), since
+pre-installing default skills is pointless if `ovos-core` has no way to discover them without a
+manual restart. Sequence matters here: shared bus first, then default skills.
+
+**`ovos-config autoconfigure`-style setup choices in `ha-ovos-integration`'s config flow.**
+OVOS's own `ovos-config` (v0.3.0+) ships an `autoconfigure` utility that picks sensible
+TTS/STT plugin and voice defaults from language + an offline/online + male/female choice,
+sourced from the community-maintained
+[`OpenVoiceOS/lang_configs`](https://github.com/OpenVoiceOS/lang_configs) data. Right now,
+`ha-ovos-integration`'s config flow pre-fills language/location/units from HA's own settings
+but leaves TTS/STT plugin choice entirely to each Wyoming add-on's own, separate config —
+no cross-add-on "pick offline vs. online, male vs. female" step exists. Adding one would mean
+either shelling out to `ovos-config`'s own CLI (adds a dependency inside HA Core's Python
+environment, unconfirmed whether that's clean) or reading `lang_configs`' underlying data
+directly and replicating the selection logic ourselves (more control, more to maintain).
+Neither approach attempted yet — worth spiking properly rather than guessing which is cleaner.
 
 ## Original 3-repo plan (superseded, kept for history)
 
