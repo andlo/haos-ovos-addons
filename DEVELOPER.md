@@ -54,9 +54,14 @@ is what happens today (`ovos-skills`' bus, for example, never leaves its own con
   the live runtime, and a runtime bug can't corrupt an install in progress.
 - **"Hot install" without a restart**: `ovos-skills` already emits
   `ovos.skills.install.complete` internally (confirmed — it's how its own async job status
-  works). Pointing that emit at the *shared* bus instead of its own private one means `ovos-core`
-  can listen for it and reload its skill list immediately — no add-on restart needed to pick up
-  a newly-installed skill.
+  works). **Revised, see "Skill runtime: the real design question" below** — pointing the emit
+  at the shared bus alone doesn't solve this the way this paragraph originally assumed. A skill
+  installed via `ovos-skills`' pip mechanism lands in *its own container's* `site-packages`,
+  physically absent from `ovos-core`'s separate container/filesystem — a bus message can't
+  make files appear where they don't exist. The persist/restore mechanism `ovos-skills` already
+  has (`PERSIST_DIR` on the shared `/share` volume, proven surviving rebuilds) is the piece
+  that actually solves file availability; a bus message on top of that can still trigger
+  `ovos-core` to reload once the files are actually there.
 - **Other OVOS add-ons follow the same pattern later**: `ovos-persona`, and eventually
   `ovos-common-query`, OCP (media-playback skills), etc. — each its own add-on, all talking to
   the one shared bus, all reading/writing the one shared `/share/mycroft/mycroft.conf` (already
@@ -73,6 +78,74 @@ not `@dev`, not a loose version range. Directly, repeatedly confirmed this sessi
 `DOCS.md`) purely from an unpinned `ovos-persona>=0.9.0a6` dependency continuing to drift
 underneath a fixed commit. `ovos-core` sits at the center of this new architecture; the same
 mistake here would be worse, not equally bad.
+
+### Skill runtime: the real design question (needs its own session, not decided yet)
+
+Raised while working out how `ovos-skills` and `ovos-core` should actually connect over the
+shared bus, and it turned into something bigger: a genuine architecture question about *where
+skills should run at all*, not just how two add-ons talk to each other.
+
+**The bus address problem that started this.** `ovos-core`'s own `run.sh` writes
+`websocket.host: "0.0.0.0"` into the *shared* `/share/mycroft/mycroft.conf` — correct as a
+*bind* address (listen on all interfaces), wrong as a *connect* address for any other
+container to reach it. Since the file is genuinely shared (same bytes, read by every add-on),
+that one key can't hold both a correct bind value for `ovos-core` and a correct connect value
+for everyone else at once. `ovos_bus_client.MessageBusClient(host=..., port=...)` does accept
+explicit overrides bypassing shared config entirely (confirmed by reading its constructor) —
+usable for code we own (our own `api.py`), but not for `ovos-skill-installer`, the external
+`SkillsStore` process `ovos-skills` runs, which has no such override and would always read
+whatever's in the shared file.
+
+**Checked how OVOS's own official Docker deployment solves this** — SSH'd into a real,
+independently-running install (10-day uptime, healthy). Its skills run each in their *own*
+container (`ovos-skill-launcher <skill_id>`, `docker.io/smartgic/ovos-skill-*` images) — not
+pip-installed into `ovos-core`'s own `site-packages` the way this project's `extra_pip_packages`
+currently works. Its shared config genuinely does use `"websocket": {"host": "0.0.0.0"}` across
+every container, bind and connect both. **Why that works there and can't be copied here**:
+confirmed via `docker inspect --format '{{.HostConfig.NetworkMode}}'` — every one of its
+containers runs `network_mode: host`. They all share the *host machine's own network stack*
+directly, not Docker's normal isolated bridge network (which is what every Supervisor add-on
+in this project uses, each with its own IP, reached by hostname). `"0.0.0.0"`/`"localhost"`
+resolving correctly everywhere is a consequence of host networking, not of one-container-per-skill
+as an architecture. Running HAOS add-ons in host network mode would be a real, unwanted
+security/isolation regression from normal add-on convention — not adopted here. The address
+problem above is still real and still needs the hostname-based (or `PERSIST_DIR`-copy) approach
+already discussed, regardless of which skill-runtime shape gets picked below.
+
+**The actual, separate question this surfaced**: should skills run *inside* `ovos-core`'s own
+process (today's model — `extra_pip_packages` installs into its `site-packages`, loaded via
+entry points), or in a separate container, closer to OVOS's own official pattern? Real tradeoff
+on both sides:
+- **Inside `ovos-core`** (current): simple, fewer moving parts, already proven working
+  end-to-end. Real risk: a skill's own bad dependency, or a skill that crashes hard, shares
+  `ovos-core`'s process and address space with the actual intent-matching engine — nothing
+  isolates the runtime from the skills running inside it.
+- **Separate container(s)**, matching OVOS's own official architecture more closely: a bad
+  skill can't take down `ovos-core` itself, skills can restart/update independently. Real cost:
+  more infrastructure, and — critically — one-add-on-per-skill (which is genuinely how
+  `ovos-docker` does it, 15+ separate skill containers) doesn't fit how a HAOS user browses
+  the Add-on Store at all. Nobody wants to hunt through 30 individually-listed add-ons to find
+  "date and time."
+
+**Direction settled on, not yet built**: not one add-on per skill. Instead, something closer
+to a **curated two-tier model**:
+- A **default skills add-on/runtime** — ships with a small, chosen set of default skills
+  already installed and running (revisiting "default installed skills" from earlier, now that
+  `ovos-core` can actually run them), with room to add a few more from a short, *curated* list
+  we've actually vetted for this environment — not the full open OVOS catalog. This is the
+  "just works" tier for most users.
+- A **separate, advanced/extra skills add-on** for open-ended installs — pip package name or
+  `git+https://...` URL, anything from the catalog or beyond it. This is close to what
+  `ovos-skills` already does today (open pip+git install, no curation) — the idea is to keep
+  that *specific* risk (arbitrary code from an arbitrary URL) isolated in its own add-on,
+  separate from the curated default set, so a risky advanced install can't destabilize the
+  "just works" tier. Same isolation philosophy already applied to keeping `ovos-skills`
+  separate from `ovos-core` in the first place — extended one level further.
+
+This directly connects to two other open threads: the "self-hosted, curated skill catalog"
+idea above (the curated tier's skill list is exactly what that catalog would need to define),
+and "default installed skills" (the default tier's initial contents). Needs its own dedicated
+design session before building anything — this paragraph is the direction, not a spec.
 
 ### Scope: v1 (synchronous) vs. v2 (proactive)
 
@@ -96,9 +169,9 @@ mistake here would be worse, not equally bad.
 
 ### Where this leaves "default installed skills"
 
-Genuinely not meaningful until `ovos-core` exists — an installed skill is inert either way right
-now, no matter how good it is, since nothing loads or runs it. Worth deciding once the runtime
-is real, not before.
+Was "not meaningful until `ovos-core` exists" — no longer true, `ovos-core` now runs skills
+for real. Superseded by "Skill runtime: the real design question" above, which folds default
+skills into the curated-tier design rather than treating it as a standalone decision.
 
 ### `ovos-core` add-on: built, deployed, working end-to-end on real hardware
 
@@ -131,26 +204,19 @@ PHAL's own existing plugin interface. Speculative until a concrete skill needs i
 OVOS's own official `skills.json` feed directly — no filtering, no vetting. The idea: fork
 that feed (same move already made once for `ovos-skill-browser`, later archived once config
 subentries made a standalone browse page redundant — see "Original 3-repo plan" below) and
-maintain a curated subset, or an added `verified_haos: true`/`false` flag per entry, covering
-only skills actually confirmed to work well in *this* environment (no GUI dependency, no
-assumption of a physical mic/speaker, no skill that needs hardware this project doesn't have).
-Real tradeoff, not a free win: a fork needs active syncing against upstream or it silently
-goes stale and stops offering skills the community adds later — this is a genuine ongoing
-maintenance commitment, not a one-time fork-and-forget. Worth doing once there's a real backlog
-of skills confirmed to behave badly in this environment specifically (worth curating *against*),
-not preemptively.
+maintain a curated subset, or an added `verified_haos: true`/`false` flag per entry. Refined
+during discussion: less about skills that "behave badly" and more about skills that
+*structurally* don't make sense in this environment at all — e.g. a desktop application
+launcher skill assumes a desktop environment this project has no concept of; a skill needing
+a GUI assumes a screen HAOS doesn't provide. Curating against a "doesn't fit this environment"
+list, not just a "doesn't work well" one. Real tradeoff, not a free win: a fork needs active
+syncing against upstream or it silently goes stale and stops offering skills the community
+adds later — a genuine ongoing maintenance commitment, not a one-time fork-and-forget. This is
+also exactly the list the curated default/advanced skill tiers (see "Skill runtime" above)
+would need to define, so the two ideas converge into one piece of work, not two.
 
-**Default installed skills.** Raised earlier this session and correctly deferred at the time —
-an installed skill was inert either way, since nothing loaded or ran it. Now that `ovos-core`
-genuinely runs skills (confirmed working end-to-end), this is worth revisiting for real. Natural
-approach: follow OVOS's own `ovos-installer` default-skill list rather than inventing one from
-scratch — same "copy the official convention" pattern used for the install recipe itself. Where
-this should live is an open question, not yet decided: `ovos-skills` already has the
-persist/restore mechanism a set of always-present skills would need to survive rebuilds, which
-argues for building it there rather than in `ovos-core` — but that's contingent on the
-still-unbuilt shared-bus connection between the two (see "Hot install" above), since
-pre-installing default skills is pointless if `ovos-core` has no way to discover them without a
-manual restart. Sequence matters here: shared bus first, then default skills.
+**Default installed skills.** Folded into "Skill runtime: the real design question" above —
+the curated tier's initial contents.
 
 **`ovos-config autoconfigure`-style setup choices in `ha-ovos-integration`'s config flow.**
 OVOS's own `ovos-config` (v0.3.0+) ships an `autoconfigure` utility that picks sensible
