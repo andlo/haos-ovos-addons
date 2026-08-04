@@ -109,10 +109,15 @@ class SkillProcessManager:
             if existing is not None and existing.poll() is None:
                 return  # already running
             self._stopping.discard(skill_id)
-            proc = subprocess.Popen(
-                ["ovos-skill-launcher", skill_id],
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-            )
+            # No stdout=/stderr=PIPE: inherit this process's own stdout/
+            # stderr instead, so each skill's own log output goes
+            # straight to this add-on's normal HA log (visible via the
+            # usual add-on log view) -- confirmed the hard way that PIPE
+            # silently swallows a skill's own error output, since nothing
+            # ever reads from that pipe unless the process has already
+            # died. Prefixing each skill's log lines would need a real
+            # log-forwarding thread; not done yet, see DEVELOPER.md.
+            proc = subprocess.Popen(["ovos-skill-launcher", skill_id])
             self._procs[skill_id] = proc
         LOG.info(f"Launched skill process for {skill_id} (pid {proc.pid})")
 
