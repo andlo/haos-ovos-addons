@@ -1,52 +1,111 @@
 # Developer notes — HA-OVOS project
 
-🚧 Work in progress. This document describes the main outline of the idea and what needs to
-be built across the project's three repos. It is not a finished spec, but a working baseline.
+🚧 Work in progress.
 
 ## The idea
 
 Make it easy for an ordinary HAOS user to discover and use OpenVoiceOS (OVOS) — without them
 needing to know it's OVOS. HAOS users already know the pattern "go to the Add-on Store, install,
-fill in a form". Most of the technical foundation (Wyoming bridges, persona server,
-skill.json metadata, skill manager) already exists in the OVOS ecosystem. The job is packaging
-and integration, not inventing something new.
+fill in a form". Most of the technical foundation (Wyoming bridges, persona server, `SkillsStore`)
+already exists in the OVOS ecosystem. The job is packaging and integration, not inventing
+something new.
 
-## The three repos
+## Current state (supersedes the original 3-repo plan below)
 
-### 1. `haos-ovos-addons` (this repo) — build first
+Two repos now, not three — `ovos-skill-browser` and the standalone `haos-ovos-skills` were both
+folded into other things (see each repo's own README for the "why", they're archived not
+deleted):
 
-Real HA Supervisor add-ons. Each add-on: `config.yaml`, `Dockerfile`, `run.sh`, `translations/en.yaml`.
+- **This repo** (`haos-ovos-addons`) — five Supervisor add-ons: `ovos-wyoming-tts`, `-stt`,
+  `-wakeword`, `ovos-persona`, `ovos-skills`. All confirmed working on real hardware; see each
+  add-on's own `DOCS.md` for what's verified and what isn't.
+- **[ha-ovos-integration](https://github.com/andlo/ha-ovos-integration)** — the HA integration:
+  shared config (language/location/units) and per-skill management via config subentries, both
+  confirmed working end-to-end on real hardware.
 
-- **ovos-wyoming-tts / -stt / -wakeword**: wrapper around OVOS's Wyoming bridges. `run.sh` builds
-  a `mycroft.conf` from the add-on options (`plugin`, `plugin_config` as JSON, `extra_pip_packages`
-  to install new plugins without rebuilding the image), then starts the bridge.
-- **ovos-persona**: wrapper around `ovos-persona-server`. Options: `solvers` (list),
-  `solver_config` (JSON), `extra_pip_packages`. `run.sh` builds `persona.json` and starts the
-  server. Exposes an Ollama-compatible endpoint for HA's conversation-agent integration.
-- **ovos-skill-config**: wrapper around `ovos-skill-config-tool` (already exists as a pip
-  package). Pure packaging, no new logic.
+## Next big piece: a shared messagebus, and a real `ovos-core` runtime
 
-All four require no `docker.sock` access, no sibling containers — plain, "supported" HA add-ons.
+Everything built so far makes OVOS components *installable* and *configurable* from HA's own
+UI. None of it makes a skill actually *respond* to anything — confirmed and discussed at length,
+not assumed: `ovos-skills` only installs a skill's Python package; nothing loads it as a live,
+running skill connected to a real intent-matching messagebus. `ovos-persona` and the Wyoming
+bridges don't touch OVOS's own intent system at all — persona is a standalone chat-completion
+server, and the Wyoming bridges are audio plugins for HA's *own* Assist pipeline.
 
-### 2. `ovos-skill-browser` — build after #1
+### The architecture, settled after working through it properly
 
-Fork of [OpenVoiceOS/OVOS-skills-store](https://github.com/OpenVoiceOS/OVOS-skills-store)
-(the repo is explicitly designed to be forked). A self-hosted browse page over the `skills.json`
-feed, with icons, descriptions, tags, and "Install Skill" buttons. Runs outside HAOS, e.g. on
-Proxmox next to the OVOS stack.
+**One shared `ovos-messagebus`, hosted by a new `ovos-core` add-on**, reachable by every other
+OVOS add-on on Supervisor's internal network (the same way add-ons already reach each other by
+hostname throughout this project) — not each add-on running its own private, isolated bus, which
+is what happens today (`ovos-skills`' bus, for example, never leaves its own container).
 
-**The first task is to investigate, not build:** check whether the "Install Skill" button talks
-directly to a local `ovos-core` instance, or only supports GGWave audio transfer. If a bridge to
-`ovos_skill_manager` (OSM) is needed, it's built here.
+- **`ovos-core`** (new add-on): the actual skill runtime — intent matching, skill manager,
+  `ovos-core`'s own built-in fallback-skill cascade (`ovos-skill-fallback-chatgpt`,
+  `ovos-skill-fallback-unknown` — both already in the catalog, no new mechanism needed), and a
+  synchronous question-in/answer-out HTTP endpoint for HA's Assist pipeline to call as a
+  conversation agent, same integration point `ovos-persona` already uses. Runs as one
+  **persistent, long-running process**, not spun up per request — required for a skill to hold
+  any state at all (an in-progress timer, a multi-turn conversation), and what makes the v2
+  proactive-speech extension (below) an addition later rather than a rewrite now.
+- **`ovos-skills` stays exactly as it is** — the isolated, now-thoroughly-stability-tested
+  install/uninstall mechanism, deliberately *not* merged into `ovos-core`'s process. Installing
+  or removing a skill is a different, riskier operation (arbitrary pip dependencies, potential
+  crashes) than running one, and keeping them apart means a bad skill install can't take down
+  the live runtime, and a runtime bug can't corrupt an install in progress.
+- **"Hot install" without a restart**: `ovos-skills` already emits
+  `ovos.skills.install.complete` internally (confirmed — it's how its own async job status
+  works). Pointing that emit at the *shared* bus instead of its own private one means `ovos-core`
+  can listen for it and reload its skill list immediately — no add-on restart needed to pick up
+  a newly-installed skill.
+- **Other OVOS add-ons follow the same pattern later**: `ovos-persona`, and eventually
+  `ovos-common-query`, OCP (media-playback skills), etc. — each its own add-on, all talking to
+  the one shared bus, all reading/writing the one shared `/share/mycroft/mycroft.conf` (already
+  built and proven across five add-ons — new ones just need to follow the same convention).
 
-### 3. `haos-ovos-skills` — deliberately deferred
+**Why separate add-ons instead of one big one**: stability and independent lifecycles — updating
+`ovos-skills` (or eventually OCP, common-query, etc.) shouldn't require rebuilding or risk
+breaking `ovos-core` itself. Matches OVOS's own recommended multi-container pattern
+(`ovos-docker`), not something invented here.
 
-HAOS variant where multiple skills share the same container/Python environment (unlike
-`ovos-docker`'s model of one container per skill). Two open questions before this makes sense:
+**`ovos-core` must be pinned hard** to a specific, individually-verified commit from day one —
+not `@dev`, not a loose version range. Directly, repeatedly confirmed this session:
+`ovos-persona-server`'s `@dev` chase cost real, hours-long instability (see `ovos-persona`'s
+`DOCS.md`) purely from an unpinned `ovos-persona>=0.9.0a6` dependency continuing to drift
+underneath a fixed commit. `ovos-core` sits at the center of this new architecture; the same
+mistake here would be worse, not equally bad.
 
-- **Dependency conflicts**: multiple skills' pip requirements in the same environment can
-  collide. This is exactly what one-container-per-skill in `ovos-docker` avoids.
-- **Missing plug into Assist**: skills run over OVOS's messagebus/HiveMind, not Wyoming or the
-  Ollama API. There is no established "plug" into HA's UI yet.
+### Scope: v1 (synchronous) vs. v2 (proactive)
 
-Revisit once #1 and #2 are in production.
+- **v1** — a skill can *answer* a direct question through the synchronous HTTP endpoint.
+  Skills-first, falling back to persona/LLM only if nothing matches — precise, deterministic
+  answers (e.g. "what's today's date") beat an LLM guessing. Explicitly does **not** cover a
+  skill speaking on its own initiative (a timer firing, an alarm going off) — those need
+  something to actively push audio into HA independent of a question being asked, which v1's
+  synchronous request/response shape can't do.
+- **v2** — the same persistent process also listens on the shared bus for `speak` messages that
+  *aren't* a reply to an active HTTP call, and forwards them into HA via
+  `assist_satellite.announce`/`tts.speak` (needs an API token back into HA). Additive to v1's
+  process, not a rewrite — this is exactly why v1 has to be a persistent process from the start.
+  Open question still unresolved: which physical speaker a given proactive alert should play on
+  — OVOS's own skill has no concept of "which HA satellite entity"; likely a single, fixed,
+  pre-chosen satellite for v2 rather than anything dynamic.
+- **Messagebus exposure**: hosting the shared bus means binding beyond `localhost` within the
+  container, and `ovos-messagebus` has no built-in access control. Scoped to Supervisor's own
+  internal network, not exposed to the LAN — the same tradeoff any Docker-based multi-container
+  OVOS install already accepts, not something new introduced here.
+
+### Where this leaves "default installed skills"
+
+Genuinely not meaningful until `ovos-core` exists — an installed skill is inert either way right
+now, no matter how good it is, since nothing loads or runs it. Worth deciding once the runtime
+is real, not before.
+
+## Original 3-repo plan (superseded, kept for history)
+
+The original idea was three repos: this one, a forked `ovos-skill-browser` for browsing/installing
+skills externally, and a deferred `haos-ovos-skills` for actually running them. In practice:
+`ovos-skill-browser` was archived once `ha-ovos-integration`'s config subentries made a
+standalone browse page redundant, and `haos-ovos-skills` was un-deferred, built, and then merged
+into this repo as the `ovos-skills` add-on rather than staying separate — see this repo's own
+commit history and `ovos-skills/DOCS.md` for the full reasoning. Neither ran skills live; that's
+the `ovos-core` add-on described above, not yet built.
