@@ -1,10 +1,42 @@
-"""HTTP-to-messagebus bridge for OVOS skill install/uninstall.
+"""HTTP-to-messagebus bridge for OVOS skill install/uninstall -- one
+isolated Python venv per skill.
 
-Talks to ovos-core's own SkillsStore (ovos_core.skill_installer), running
-standalone via `ovos-skill-installer` in this same container, connected to
-a private `ovos-messagebus` instance that never leaves the container. See
-DEVELOPER.md for why this replaced wrapping ovos_skill_manager (OSM),
-which ovos-core's own README says is unsupported since ovos-core 0.0.8.
+WHY: a single, shared site-packages for every skill meant one skill's
+own dependency requirements could silently break another skill, or
+ovos-core itself -- confirmed for real, same night this was built:
+installing skill-ovos-wolfie pulled in a newer ovos-workshop that
+ovos-core and ovos-skill-dictation are NOT compatible with, corrupting
+the shared environment for everything, not just wolfie. A per-skill
+venv makes this structurally impossible: each skill's own dependency
+tree lives in total isolation from every other skill and from
+ovos-core itself.
+
+This also sidesteps, for free, the importlib.metadata-in-a-long-running-
+process unreliability the previous version of this file spent a long
+investigation chasing (see git history around that same night) -- there
+is no shared site-packages left to scan; the manifest file below IS the
+source of truth for what's installed, always read fresh off disk.
+
+PERSISTENCE MODEL: venvs themselves are NOT persisted to /share -- they
+live in this container's own filesystem layer, which does NOT survive
+an add-on rebuild/update (same fact this file has always documented).
+Only a small manifest.json (skill_id -> source URL + real package name)
+is persisted; on every container start, every venv is rebuilt from
+scratch by re-running the same install logic for each manifest entry.
+A fresh git clone + pip install per skill at every restart is a
+deliberate, accepted cost -- far simpler and more robust than the old
+file-copy persistence mechanism (a PERSIST_DIR of copied package
+files), which had its own reliability problems (RECORD file loss,
+importlib.metadata blind spots). settings.json is unaffected by any of
+this -- it already lived on /share via XDG_CONFIG_HOME, keyed by
+skill_id, independent of where the skill's own code lives.
+
+Talks to ovos-core's own SkillsStore (ovos_core.skill_installer) for
+NOTHING anymore -- confirmed unreliable for install (the "error in pip
+subprocess" job-status false negatives) same as it already was for
+uninstall (see the old _direct_pip_uninstall's docstring, now removed
+along with the messagebus dependency itself). This file no longer
+connects to the messagebus at all.
 """
 from __future__ import annotations
 
@@ -13,9 +45,7 @@ import logging
 import os
 import re
 import shutil
-import site
 import subprocess
-import sys
 import threading
 import time
 from contextlib import asynccontextmanager
@@ -24,68 +54,238 @@ from typing import Any
 import requests
 from fastapi import Body, FastAPI, HTTPException
 from pydantic import BaseModel
-from ovos_bus_client import MessageBusClient, Message
 
 LOG = logging.getLogger("ovos-skills-api")
 
-# pip installs land in the container's own filesystem layer, which does
-# NOT survive an add-on rebuild/update — confirmed on real hardware: a
-# skill installed, then wiped clean by the next version bump. After every
-# successful install, newly-added package files get copied here (on the
-# /share volume, which does persist); run.sh copies them back into
-# site-packages on every container start, before anything else runs.
-PERSIST_DIR = "/share/ovos-skills/persisted-packages"
+# Inside the container's OWN filesystem, deliberately NOT on /share --
+# see module docstring's "PERSISTENCE MODEL".
+VENV_ROOT = "/opt/skill-venvs"
 
-# Run in a fresh `python -c` subprocess by SkillProcessManager._discover()
-# -- see that method's docstring for why this can't run inline in this
-# long-running process.
-_DISCOVER_SCRIPT = """
-import importlib.metadata, json
-result = {}
-for group in ("opm.skill", "ovos.plugin.skill"):
-    for ep in importlib.metadata.entry_points(group=group):
-        if ep.name not in result:
-            result[ep.name] = ep.dist.name if ep.dist else ep.name
-print(json.dumps(result))
-"""
+# The ONLY thing persisted for reinstall purposes: skill_id -> {source,
+# package_name}. Small, human-readable, and enough to fully reconstruct
+# every venv from scratch.
+MANIFEST_PATH = "/share/ovos-skills/manifest.json"
 
 CATALOG_URL = "https://openvoiceos.github.io/OVOS-skills-store/skills.json"
-BUS_TIMEOUT = 300  # generous — this now runs in a background thread, not
-                    # blocking any HTTP client, so a slow git clone + pip
-                    # resolve is fine. A synchronous "block until pip
-                    # finishes" design would be a poor fit for eventually
-                    # being called from a HA config flow anyway — those
-                    # expect quick responses, not multi-minute waits.
+INSTALL_TIMEOUT = 300  # venv create + pip install -- a slow git clone +
+                        # dependency resolve is realistic, not a hang
 
-bus: MessageBusClient | None = None
 jobs: dict[str, dict] = {}  # key: url (install) or skill_id (uninstall)
 
 
-class SkillProcessManager:
-    """Launches and supervises one `ovos-skill-launcher <skill_id>`
-    subprocess per installed skill, each connecting independently to the
-    shared bus. Confirmed for real: a skill launched this way, in this
-    container, answers correctly through ovos-core's own /ask -- it
-    never needs to be present in ovos-core's own site-packages (see
-    DEVELOPER.md's "Skill runtime" section for the full proof). This is
-    the permanent replacement for the manual /debug/launch-skill endpoint
-    used to first confirm the mechanism.
+def _read_manifest() -> dict:
+    if not os.path.isfile(MANIFEST_PATH):
+        return {}
+    try:
+        with open(MANIFEST_PATH) as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
 
-    Discovers installed skills via importlib.metadata entry_points
-    (group 'opm.skill', falling back to the deprecated 'ovos.plugin.skill'
-    for older skill packages) rather than guessing from pip package names
-    -- confirmed this gives the exact dotted skill_id ovos-skill-launcher
-    needs, AND the real owning package name in the same call, so install/
-    uninstall can look up the right running process without fuzzy
-    matching.
+
+def _write_manifest(manifest: dict) -> None:
+    os.makedirs(os.path.dirname(MANIFEST_PATH), exist_ok=True)
+    tmp = MANIFEST_PATH + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(manifest, f, indent=2)
+    os.replace(tmp, MANIFEST_PATH)  # atomic
+
+
+def _venv_dir(skill_id: str) -> str:
+    # skill_id is already a safe dotted string (e.g.
+    # "skill-ovos-alerts.openvoiceos"), but normalize defensively --
+    # this becomes a real directory name.
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", skill_id)
+    return os.path.join(VENV_ROOT, safe)
+
+
+_ENTRY_POINTS_SCRIPT = """
+import importlib.metadata, json
+result = []
+for group in ("opm.skill", "ovos.plugin.skill"):
+    for ep in importlib.metadata.entry_points(group=group):
+        result.append({"skill_id": ep.name, "package_name": ep.dist.name if ep.dist else ep.name})
+print(json.dumps(result))
+"""
+
+
+def _create_venv(venv_dir: str) -> tuple[bool, str]:
+    """Uses `virtualenv`, not the stdlib venv module -- see Dockerfile's
+    comment for why (more reliable ensurepip bootstrapping on Alpine).
+    """
+    if os.path.isdir(venv_dir):
+        shutil.rmtree(venv_dir)  # stale/partial venv from a failed attempt
+    try:
+        subprocess.run(
+            ["virtualenv", venv_dir],
+            capture_output=True, text=True, timeout=60, check=True,
+        )
+        return True, ""
+    except subprocess.CalledProcessError as exc:
+        return False, (exc.stderr or exc.stdout or "venv creation failed").strip()
+    except subprocess.TimeoutExpired:
+        return False, "venv creation timed out"
+
+
+def _venv_pip_install(venv_dir: str, source: str) -> tuple[bool, str]:
+    pip_bin = os.path.join(venv_dir, "bin", "pip")
+    try:
+        result = subprocess.run(
+            [pip_bin, "install", "--no-input", source],
+            capture_output=True, text=True, timeout=INSTALL_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        return False, "pip install timed out"
+    if result.returncode != 0:
+        return False, (result.stderr or result.stdout or "pip install failed").strip()
+    return True, result.stdout
+
+
+def _venv_discover_skill(venv_dir: str) -> list[dict]:
+    """Every skill entry_point visible in THIS venv -- normally just the
+    one skill just installed, since each venv is fresh and isolated.
+    A fresh subprocess against this specific venv's own interpreter,
+    same reasoning the rest of this project already established for
+    avoiding importlib.metadata staleness in a long-running process --
+    except here there's no long-running-process risk at all, since this
+    runs once, immediately after install.
+    """
+    python_bin = os.path.join(venv_dir, "bin", "python")
+    try:
+        raw = subprocess.check_output(
+            [python_bin, "-c", _ENTRY_POINTS_SCRIPT],
+            text=True, stderr=subprocess.STDOUT, timeout=30,
+        )
+        return json.loads(raw)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError) as exc:
+        LOG.error(f"entry_points discovery failed in {venv_dir}: {exc}")
+        return []
+
+
+def _pip_show_files(venv_dir: str, package_name: str) -> tuple[str, list[str]] | None:
+    """(site-packages location, [file paths relative to it]) for a
+    package installed in a SPECIFIC skill's own venv, via that venv's
+    own `pip show -f` -- not importlib.metadata, and not the main
+    container's own pip (which has no visibility into a venv it didn't
+    create the process from).
+    """
+    pip_bin = os.path.join(venv_dir, "bin", "pip")
+    try:
+        raw = subprocess.check_output(
+            [pip_bin, "show", "-f", package_name],
+            text=True, stderr=subprocess.STDOUT,
+        )
+    except subprocess.CalledProcessError:
+        return None
+
+    location = None
+    files: list[str] = []
+    in_files = False
+    for line in raw.splitlines():
+        if line.startswith("Location:"):
+            location = line.split(":", 1)[1].strip()
+        elif line.startswith("Files:"):
+            in_files = True
+        elif in_files and line.startswith("  "):
+            files.append(line.strip())
+        elif in_files:
+            in_files = False
+
+    return (location, files) if location is not None else None
+
+
+def _venv_pip_show_version(venv_dir: str, package_name: str) -> str | None:
+    pip_bin = os.path.join(venv_dir, "bin", "pip")
+    try:
+        raw = subprocess.check_output(
+            [pip_bin, "show", package_name], text=True, stderr=subprocess.STDOUT,
+        )
+    except subprocess.CalledProcessError:
+        return None
+    for line in raw.splitlines():
+        if line.startswith("Version:"):
+            return line.split(":", 1)[1].strip()
+    return None
+
+
+def _install_skill_into_venv(source: str) -> dict | None:
+    """Full install flow: fresh venv, pip install, discover the actual
+    skill_id it registers. Returns {"skill_id", "package_name"} on
+    success, None on failure.
+
+    Uses a temp dir first, discovers the real skill_id, THEN moves into
+    its final, name-keyed location -- the skill_id isn't known until
+    after install completes (the catalog's own skill_id is trusted for
+    display purposes only; this is the confirmed-real one).
+    """
+    tmp_dir = os.path.join(VENV_ROOT, f".tmp-{os.getpid()}-{int(time.time() * 1000)}")
+    ok, err = _create_venv(tmp_dir)
+    if not ok:
+        LOG.error(f"venv creation failed for {source}: {err}")
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        return None
+
+    ok, err = _venv_pip_install(tmp_dir, source)
+    if not ok:
+        LOG.error(f"pip install failed for {source}: {err}")
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        return None
+
+    entries = _venv_discover_skill(tmp_dir)
+    if not entries:
+        LOG.error(f"No skill entry_point found after installing {source}")
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        return None
+
+    chosen = entries[0]
+    if len(entries) > 1:
+        LOG.warning(
+            f"{source} registered {len(entries)} skill entry_points, "
+            f"using {chosen['skill_id']} (first)"
+        )
+
+    skill_id = chosen["skill_id"]
+    final_dir = _venv_dir(skill_id)
+    if os.path.isdir(final_dir):
+        shutil.rmtree(final_dir)  # reinstall/upgrade case
+    shutil.move(tmp_dir, final_dir)
+
+    return {"skill_id": skill_id, "package_name": chosen["package_name"]}
+
+
+def _rebuild_all_venvs_from_manifest():
+    """On every container start, every skill's venv must be rebuilt from
+    scratch -- venvs are NOT persisted (see module docstring). Runs
+    synchronously, before discover_and_launch_all(), since launch()
+    needs each venv's own ovos-skill-launcher to already exist on disk.
+    """
+    manifest = _read_manifest()
+    for skill_id, entry in manifest.items():
+        venv_dir = _venv_dir(skill_id)
+        if os.path.isfile(os.path.join(venv_dir, "bin", "ovos-skill-launcher")):
+            continue  # already present -- shouldn't normally happen on
+                       # a genuinely fresh container, but cheap to check
+        LOG.info(f"Rebuilding venv for {skill_id} from {entry['source']}")
+        ok, err = _create_venv(venv_dir)
+        if not ok:
+            LOG.error(f"Failed to rebuild venv for {skill_id}: {err}")
+            continue
+        ok, err = _venv_pip_install(venv_dir, entry["source"])
+        if not ok:
+            LOG.error(f"Failed to reinstall {skill_id} into its venv: {err}")
+            shutil.rmtree(venv_dir, ignore_errors=True)
+
+
+class SkillProcessManager:
+    """One isolated venv per skill (see module docstring) -- launches
+    <venv>/bin/ovos-skill-launcher <skill_id> per entry, not a shared,
+    container-wide binary. The manifest file is the sole source of
+    truth for what's installed; no site-packages scanning of any kind.
     """
 
     MAX_RESTARTS = 5  # per skill_id, not reset -- a skill that crashes
                        # this many times has a real bug, not a transient
-                       # hiccup; stop burning CPU on an infinite restart
-                       # loop and leave it visibly dead in status() for a
-                       # human to notice, rather than silently retrying
-                       # forever.
+                       # hiccup.
     MONITOR_INTERVAL = 10
 
     def __init__(self):
@@ -96,31 +296,9 @@ class SkillProcessManager:
 
     @staticmethod
     def _discover() -> dict[str, str]:
-        """Returns {skill_id: package_name} for every currently-installed
-        skill in this container.
-
-        Runs in a FRESH subprocess, matching the /skills endpoint's own
-        `pip list` pattern -- NOT importlib.metadata.entry_points() in
-        this long-running process. Confirmed for real, this session
-        (skill-ovos-wolfie): a package installed by another process (the
-        messagebus-driven install flow, running in a separate
-        ovos-skill-installer process) after this process started is
-        invisible here even after importlib.reload(importlib.metadata) --
-        genuinely on disk, seen correctly by `pip list`, but absent from
-        this process's own importlib.metadata view. A fresh interpreter
-        reads site-packages from scratch every time and sees it
-        correctly, same reasoning as _find_installed_package's own use
-        of `pip list` elsewhere in this file.
-        """
-        try:
-            raw = subprocess.check_output(
-                [sys.executable, "-c", _DISCOVER_SCRIPT],
-                text=True, stderr=subprocess.STDOUT,
-            )
-            return json.loads(raw)
-        except (subprocess.CalledProcessError, json.JSONDecodeError) as exc:
-            LOG.error(f"Skill discovery subprocess failed: {exc}")
-            return {}
+        """{skill_id: package_name}, straight from the manifest."""
+        manifest = _read_manifest()
+        return {skill_id: entry["package_name"] for skill_id, entry in manifest.items()}
 
     def package_name_for(self, skill_id: str) -> str | None:
         return self._discover().get(skill_id)
@@ -137,15 +315,17 @@ class SkillProcessManager:
             if existing is not None and existing.poll() is None:
                 return  # already running
             self._stopping.discard(skill_id)
+            launcher = os.path.join(_venv_dir(skill_id), "bin", "ovos-skill-launcher")
+            if not os.path.isfile(launcher):
+                LOG.error(
+                    f"No launcher found for {skill_id} at {launcher} -- "
+                    f"venv missing or install incomplete"
+                )
+                return
             # No stdout=/stderr=PIPE: inherit this process's own stdout/
-            # stderr instead, so each skill's own log output goes
-            # straight to this add-on's normal HA log (visible via the
-            # usual add-on log view) -- confirmed the hard way that PIPE
-            # silently swallows a skill's own error output, since nothing
-            # ever reads from that pipe unless the process has already
-            # died. Prefixing each skill's log lines would need a real
-            # log-forwarding thread; not done yet, see DEVELOPER.md.
-            proc = subprocess.Popen(["ovos-skill-launcher", skill_id])
+            # stderr, so each skill's own log output goes straight to
+            # this add-on's normal HA log.
+            proc = subprocess.Popen([launcher, skill_id])
             self._procs[skill_id] = proc
         LOG.info(f"Launched skill process for {skill_id} (pid {proc.pid})")
 
@@ -164,8 +344,7 @@ class SkillProcessManager:
 
     def discover_and_launch_all(self):
         """Launch every currently-installed skill. Called once at
-        startup, after both this container's persisted packages are
-        restored (run.sh) and the shared bus is confirmed reachable.
+        startup, after _rebuild_all_venvs_from_manifest() has finished.
         """
         for skill_id in self._discover():
             self.launch(skill_id)
@@ -212,15 +391,10 @@ skill_procs = SkillProcessManager()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global bus
-    bus = MessageBusClient()
-    bus.run_in_thread()
-    bus.connected_event.wait(timeout=10)
+    _rebuild_all_venvs_from_manifest()
     skill_procs.discover_and_launch_all()
     skill_procs.start_monitor()
     yield
-    if bus:
-        bus.close()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -230,45 +404,12 @@ class InstallRequest(BaseModel):
     url: str
 
 
-def emit_and_wait_either(msg_type: str, data: dict, ok_type: str, fail_type: str, timeout: float):
-    """Emit exactly once, then wait for whichever of two reply types
-    arrives first — unlike wait_for_response(reply_type=...), which only
-    matches one type and would require a second emit() (a second pip
-    install!) as a fallback if the actual reply was the other type.
-    """
-    result: dict = {}
-    done = threading.Event()
-
-    def _on_ok(message):
-        result["ok"] = True
-        result["data"] = message.data
-        done.set()
-
-    def _on_fail(message):
-        result["ok"] = False
-        result["data"] = message.data
-        done.set()
-
-    bus.once(ok_type, _on_ok)
-    bus.once(fail_type, _on_fail)
-    bus.emit(Message(msg_type, data))
-
-    if not done.wait(timeout=timeout):
-        bus.remove(ok_type, _on_ok)
-        bus.remove(fail_type, _on_fail)
-        return None
-    return result
-
-
 @app.get("/health")
 def health():
-    return {"bus_connected": bool(bus and bus.connected_event.is_set())}
-
-
-@app.get("/debug/test-show")
-def debug_test_show(package: str):
-    """TEMPORARY."""
-    return {"pip_show_files": _pip_show_files(package)}
+    # No messagebus connection to report on anymore -- this add-on no
+    # longer talks to it at all (see module docstring). "true" here
+    # just means the API itself is up.
+    return {"bus_connected": True}
 
 
 @app.get("/skills/running")
@@ -283,8 +424,8 @@ def running_skills():
 
 @app.get("/catalog")
 def get_catalog():
-    """Proxy the official, curated skill catalog — 36 skills as of the
-    check in DEVELOPER.md, small enough to drive a dropdown directly.
+    """Proxy the official, curated skill catalog -- small enough to
+    drive a dropdown directly.
     """
     try:
         resp = requests.get(CATALOG_URL, timeout=10)
@@ -296,167 +437,50 @@ def get_catalog():
 
 @app.get("/skills")
 def list_installed_skills():
-    """Heuristic, not a confirmed mechanism (see DEVELOPER.md): lists pip
-    packages whose name matches the 'skill-' / 'ovos-skill-' naming
-    convention seen in the official catalog's package_name fields. Revisit
-    if this proves unreliable once tested against real installs.
+    """Straight from the manifest -- the source of truth for what's
+    installed now that there's no shared site-packages to scan. Each
+    skill's version is looked up live from its own venv's pip, since
+    the manifest itself doesn't track version (a skill can be upgraded
+    independently of the manifest entry changing).
     """
-    try:
-        raw = subprocess.check_output(
-            [sys.executable, "-m", "pip", "list", "--format=json"],
-            text=True,
-            stderr=subprocess.STDOUT,
-        )
-    except subprocess.CalledProcessError as exc:
-        raise HTTPException(status_code=500, detail=f"pip list failed: {exc.output}")
-
-    packages = json.loads(raw)
-    skills = [
-        p for p in packages
-        if p["name"].startswith("ovos-skill-") or p["name"].startswith("skill-")
-    ]
+    manifest = _read_manifest()
+    skills = []
+    for skill_id, entry in manifest.items():
+        version = _venv_pip_show_version(_venv_dir(skill_id), entry["package_name"])
+        skills.append({
+            "skill_id": skill_id,
+            "package_name": entry["package_name"],
+            "source": entry["source"],
+            "version": version,
+        })
     return {"skills": skills}
 
 
-def _run_job(job_key: str, msg_type: str, data: dict, ok_type: str, fail_type: str):
-    before = _installed_names() if msg_type == "ovos.skills.install" else None
-
-    result = emit_and_wait_either(msg_type, data, ok_type, fail_type, timeout=BUS_TIMEOUT)
+def _run_install_job(job_key: str, source: str):
+    result = _install_skill_into_venv(source)
     if result is None:
-        jobs[job_key] = {"status": "failed", "error": "No reply from SkillsStore (timeout)"}
-    elif not result["ok"]:
-        jobs[job_key] = {"status": "failed", "error": result["data"].get("error", "unknown error")}
-    else:
-        jobs[job_key] = {"status": "complete"}
-
-    # Regardless of the reported job status above: confirmed for real
-    # (skill-ovos-wolfie, this session) that SkillsStore's own bus reply
-    # is not a trustworthy signal here -- the known "error in pip
-    # subprocess" case, where pip actually succeeds but the job-complete
-    # handshake back over the bus fails, used to make this code think
-    # nothing happened and skip persisting/launching entirely, leaving a
-    # genuinely-installed skill never running. What's actually
-    # importable now that wasn't before (the filesystem itself) is the
-    # only trustworthy source of truth for "did an install really
-    # happen" -- check that unconditionally instead of gating it behind
-    # the reported status.
-    if before is None:
+        jobs[job_key] = {"status": "failed", "error": "install failed -- see add-on logs for details"}
         return
 
-    persisted = []
-    try:
-        persisted = _persist_new_packages(before)
-        if persisted:
-            LOG.info(f"Persisted {len(persisted)} newly-installed package(s) to {PERSIST_DIR}: {persisted}")
-    except Exception as exc:
-        # A persistence failure shouldn't make a successful install
-        # look like it failed to the caller — the skill genuinely is
-        # installed and usable right now, it just won't survive a
-        # future add-on rebuild. Log loudly, don't flip the job status.
-        LOG.error(f"Failed to persist newly-installed packages: {exc}")
+    manifest = _read_manifest()
+    manifest[result["skill_id"]] = {"source": source, "package_name": result["package_name"]}
+    _write_manifest(manifest)
 
-    if not persisted:
-        return  # nothing was actually newly installed -- a genuine failure
+    # Gives the skill its first chance to write its own settings.json --
+    # OVOS creates this automatically the moment a skill loads, even
+    # with no settings at all, so a settings UI built on that file's
+    # actual shape (see ha-ovos-integration's skill_subentry.py) has
+    # something real to read right after a fresh install.
+    skill_procs.launch(result["skill_id"])
 
-    # Hot-launch: start every newly-discoverable skill process
-    # immediately, no container restart needed. Also gives a skill its
-    # first chance to write its own settings.json -- OVOS creates this
-    # automatically the moment a skill loads, even with no settings at
-    # all (confirmed from Mycroft's own skill-settings documentation),
-    # so a settings UI built on that file's actual shape (see
-    # ha-ovos-integration's skill_subentry.py) has something real to
-    # read right after a fresh install, not an empty {}.
-    for skill_id in skill_procs._discover():
-        skill_procs.launch(skill_id)
-
-
-def _site_packages_dir() -> str:
-    dirs = site.getsitepackages()
-    return dirs[0] if dirs else site.getusersitepackages()
-
-
-def _installed_names() -> set[str]:
-    """Via a fresh `pip list` subprocess, not importlib.metadata in this
-    process -- see SkillProcessManager._discover's docstring for why.
-    """
-    try:
-        raw = subprocess.check_output(
-            [sys.executable, "-m", "pip", "list", "--format=json"],
-            text=True, stderr=subprocess.STDOUT,
-        )
-        return {p["name"] for p in json.loads(raw)}
-    except (subprocess.CalledProcessError, json.JSONDecodeError) as exc:
-        LOG.error(f"pip list subprocess failed: {exc}")
-        return set()
-
-
-def _pip_show_files(package_name: str) -> tuple[str, list[str]] | None:
-    """(site-packages location, [file paths relative to it]) for an
-    installed package, via a fresh `pip show -f` subprocess -- NOT
-    importlib.metadata.files(), which is unreliable in this long-running
-    process for anything installed by another process after this one
-    started (see SkillProcessManager._discover's docstring for the full
-    reasoning; this hit the same wall for the same reason).
-    """
-    try:
-        raw = subprocess.check_output(
-            [sys.executable, "-m", "pip", "show", "-f", package_name],
-            text=True, stderr=subprocess.STDOUT,
-        )
-    except subprocess.CalledProcessError:
-        return None
-
-    location = None
-    files: list[str] = []
-    in_files = False
-    for line in raw.splitlines():
-        if line.startswith("Location:"):
-            location = line.split(":", 1)[1].strip()
-        elif line.startswith("Files:"):
-            in_files = True
-        elif in_files and line.startswith("  "):
-            files.append(line.strip())
-        elif in_files:
-            in_files = False
-
-    return (location, files) if location is not None else None
-
-
-def _persist_new_packages(before: set[str]) -> list[str]:
-    """Copy every file belonging to each newly-installed package (the
-    skill itself, plus any new transitive dependencies it pulled in) into
-    PERSIST_DIR, preserving their path relative to site-packages, so
-    run.sh can copy them straight back on the next container start.
-    """
-    new_names = _installed_names() - before
-    persisted = []
-    for name in new_names:
-        result = _pip_show_files(name)
-        if result is None:
-            continue
-        location, files = result
-        for rel in files:
-            src = os.path.join(location, rel)
-            if not os.path.isfile(src):
-                continue
-            dst = os.path.join(PERSIST_DIR, rel)
-            os.makedirs(os.path.dirname(dst), exist_ok=True)
-            shutil.copy2(src, dst)
-        persisted.append(name)
-    return persisted
+    jobs[job_key] = {"status": "complete", "skill_id": result["skill_id"]}
 
 
 @app.post("/skills/install")
 def install_skill(req: InstallRequest):
-    if bus is None or not bus.connected_event.is_set():
-        raise HTTPException(status_code=503, detail="Not connected to internal bus")
-
     jobs[req.url] = {"status": "pending"}
     threading.Thread(
-        target=_run_job,
-        args=(req.url, "ovos.skills.install", {"url": req.url},
-              "ovos.skills.install.complete", "ovos.skills.install.failed"),
-        daemon=True,
+        target=_run_install_job, args=(req.url, req.url), daemon=True,
     ).start()
     return {"status": "pending", "poll": f"/skills/install/status?key={req.url}"}
 
@@ -469,230 +493,54 @@ def install_status(key: str):
     return job
 
 
-def _run_uninstall_job(job_key: str, package_name: str):
-    ok, error = _direct_pip_uninstall(package_name)
-    if ok:
-        jobs[job_key] = {"status": "complete"}
-    else:
-        jobs[job_key] = {"status": "failed", "error": error}
-
-
 @app.delete("/skills/{skill_id}")
 def uninstall_skill(skill_id: str, package_name: str | None = None):
-    """Bypasses SkillsStore's own (currently stubbed) uninstall — see
-    _direct_pip_uninstall's docstring. package_name resolves the real
-    installed name via the same fuzzy matcher settingsmeta uses (the
-    catalog's package_name and the real installed name don't always
-    match); falls back to a dot-to-dash guess from skill_id if omitted,
-    same heuristic SkillsStore itself uses.
+    """rm -rf of the skill's own venv, plus removing it from the
+    manifest -- no protected-package list needed anymore (unlike the
+    old shared-site-packages design): a skill's venv can never touch
+    ovos-core's own packages or another skill's, so there's nothing
+    critical it could accidentally take down.
     """
-    real_name = None
-    if package_name:
-        real_name = _find_installed_package(package_name)
-    if real_name is None:
-        real_name = skill_id.replace(".", "-") if "." in skill_id else skill_id
+    manifest = _read_manifest()
+    if skill_id not in manifest:
+        raise HTTPException(status_code=404, detail=f"No installed skill '{skill_id}'")
 
-    jobs[skill_id] = {"status": "pending"}
-    threading.Thread(
-        target=_run_uninstall_job,
-        args=(skill_id, real_name),
-        daemon=True,
-    ).start()
+    skill_procs.stop(skill_id)
+    shutil.rmtree(_venv_dir(skill_id), ignore_errors=True)
+    manifest.pop(skill_id, None)
+    _write_manifest(manifest)
+
+    jobs[skill_id] = {"status": "complete"}
     return {"status": "pending", "poll": f"/skills/install/status?key={skill_id}"}
 
 
-def _find_installed_package(hint: str) -> str | None:
-    """The catalog's package_name doesn't always match what pip actually
-    installed it as — confirmed for real (skill-ovos-fallback-chatgpt's
-    catalog entry says ovos-skill-ovos-fallback-chatgpt, but it installs
-    as skill-ovos-fallback-chatgpt). Normalized exact match first, then a
-    unique-substring fallback, rather than trusting the hint literally.
-
-    Uses `pip list` via a fresh subprocess, NOT importlib.metadata run
-    inside this process — confirmed the hard way, with explicit logging,
-    that importlib.metadata.distributions() genuinely doesn't see
-    packages restored via run.sh's file-copy even after BOTH
-    importlib.invalidate_caches() AND reload(importlib.metadata) (85
-    packages seen, the target skill not among them), while a fresh `pip
-    list` subprocess sees it correctly every time — same mechanism the
-    /skills endpoint already relies on successfully. Whatever the exact
-    Python internals are, a long-running process's own view of
-    site-packages is not trustworthy here; a fresh subprocess's is.
-    """
-    def norm(s: str) -> str:
-        return s.lower().replace("_", "-").replace(" ", "-")
-
-    hint_norm = norm(hint)
-    try:
-        raw = subprocess.check_output(
-            [sys.executable, "-m", "pip", "list", "--format=json"],
-            text=True, stderr=subprocess.STDOUT,
-        )
-        names = [p["name"] for p in json.loads(raw)]
-    except (subprocess.CalledProcessError, json.JSONDecodeError):
-        return None
-
-    for name in names:
-        if norm(name) == hint_norm:
-            return name
-    candidates = [name for name in names if hint_norm in norm(name) or norm(name) in hint_norm]
-    return candidates[0] if len(candidates) == 1 else None
-
-
-# Mirrors SkillsStore's own hardcoded fallback protected-package list
-# exactly. Deliberately NOT read from our own constraints file — that
-# file is intentionally empty (see the stale-constraints-file fix
-# above), and SkillsStore uses that same file for both version pins AND
-# the protected-package list, so reusing it here would silently disable
-# protection entirely. Kept independent on purpose.
-PROTECTED_PACKAGES = {
-    "ovos-core", "ovos-utils", "ovos-plugin-manager",
-    "ovos-config", "ovos-bus-client", "ovos-workshop",
-}
-
-
-def _remove_package_dir_files(base_dir: str, package_name: str) -> bool:
-    """Deletes a package's dist-info dir and its module(s) from base_dir,
-    found via PEP 503 normalized-name matching against dist-info dir
-    names (<normalized_name>-<version>.dist-info) and their
-    top_level.txt — not importlib.metadata, which is unreliable in this
-    long-running process for packages restored via file-copy rather than
-    a pip install run inside it (confirmed for real: 85 packages seen,
-    a genuinely-on-disk target package not among them, even after both
-    importlib.invalidate_caches() and reload(importlib.metadata)).
-
-    Works identically against site-packages and PERSIST_DIR — both need
-    this, and having two different (and differently broken) mechanisms
-    for what's conceptually the same operation was the actual bug that
-    caused an uninstalled skill to reappear after a rebuild: the
-    site-packages side got fixed, but PERSIST_DIR's own removal was
-    still going through the old, unreliable importlib.metadata path and
-    silently doing nothing.
-    """
-    if not os.path.isdir(base_dir):
-        return False
-
-    def norm(s: str) -> str:
-        return s.lower().replace("-", "_")
-
-    target_norm = norm(package_name)
-    removed = False
-    for entry in os.listdir(base_dir):
-        if not entry.endswith(".dist-info"):
-            continue
-        m = re.match(r"^(.+?)-[^-]+\.dist-info$", entry)
-        if not m or norm(m.group(1)) != target_norm:
-            continue
-        dist_info_path = os.path.join(base_dir, entry)
-        top_level_file = os.path.join(dist_info_path, "top_level.txt")
-        module_names = []
-        if os.path.isfile(top_level_file):
-            with open(top_level_file) as f:
-                module_names = [line.strip() for line in f if line.strip()]
-        shutil.rmtree(dist_info_path, ignore_errors=True)
-        removed = True
-        for mod in module_names:
-            mod_path = os.path.join(base_dir, mod)
-            if os.path.isdir(mod_path):
-                shutil.rmtree(mod_path, ignore_errors=True)
-            elif os.path.isfile(mod_path + ".py"):
-                os.remove(mod_path + ".py")
-    return removed
-
-
-def _remove_persisted_package(package_name: str) -> None:
-    """Remove a package's files from PERSIST_DIR too — must run BEFORE
-    the actual pip uninstall, so a subsequent restart doesn't restore an
-    uninstalled skill. See _remove_package_dir_files for why this uses
-    dist-info scanning, not importlib.metadata.
-    """
-    _remove_package_dir_files(PERSIST_DIR, package_name)
-
-
-def _manual_remove_package(package_name: str) -> tuple[bool, str]:
-    """Fallback for when `pip uninstall` refuses with "no RECORD file was
-    found" — confirmed for real that our persist/restore cycle doesn't
-    reliably preserve a package's RECORD file intact (pip's own error
-    message names the exact package and file it's missing).
-    """
-    if _remove_package_dir_files(_site_packages_dir(), package_name):
-        return True, ""
-    return False, f"Could not find a dist-info directory for '{package_name}' to manually remove"
-
-
-def _direct_pip_uninstall(package_name: str) -> tuple[bool, str]:
-    """Bypasses SkillsStore/the messagebus entirely. Its own uninstall is
-    a stub on the current PyPI ovos-core — already fixed in ovos-core's
-    dev branch, but not releasable to PyPI without also resolving a
-    separate ovos-messagebus version conflict (see DOCS.md) — a
-    release-coordination problem across two repos, not something a PR
-    here could fix, unlike the missing --upgrade support (#843), which
-    was a genuine local code gap.
-
-    Deliberately a stand-in, not the destination: once a PyPI release
-    resolves that conflict, prefer switching back to SkillsStore's own
-    uninstall (same protected-package concept, better maintained) over
-    keeping this running in parallel indefinitely.
-    """
-    def norm(s: str) -> str:
-        return s.lower().replace("_", "-").replace(".", "-")
-
-    if norm(package_name) in PROTECTED_PACKAGES:
-        return False, f"refusing to uninstall protected package: {package_name}"
-
-    skill_id = skill_procs.skill_id_for_package(package_name)
-    if skill_id is not None:
-        skill_procs.stop(skill_id)
-
-    _remove_persisted_package(package_name)
-
-    # sys.executable, not a bare "pip" — matches SkillsStore's own
-    # approach. A bare "pip" can resolve to a different interpreter's
-    # pip than the one actually running this process; confirmed the hard
-    # way, reporting success while silently uninstalling from the wrong
-    # place, before switching to this.
-    cmd = [sys.executable, "-m", "pip", "uninstall", "-y", "--break-system-packages", package_name]
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-    except subprocess.TimeoutExpired:
-        return False, "pip uninstall timed out"
-
-    if result.returncode == 0:
-        return True, ""
-
-    stderr = (result.stderr or result.stdout or "").strip()
-    if "no RECORD file was found" in stderr:
-        # confirmed for real: our persist/restore cycle doesn't always
-        # keep RECORD intact — fall back to direct removal instead of
-        # failing outright.
-        return _manual_remove_package(package_name)
-
-    return False, stderr or "pip uninstall failed"
-
-
 def _settings_path(skill_id: str) -> str:
-    # Matches OVOS's own runtime convention, confirmed against real skill
-    # READMEs: ${XDG_CONFIG_HOME}/mycroft/skills/<skill_id>/settings.json
-    # — keyed by skill_id (the catalog's dotted id), not the pip package
-    # name, unlike settingsmeta lookup below.
+    # Unaffected by the venv rework -- matches OVOS's own runtime
+    # convention: ${XDG_CONFIG_HOME}/mycroft/skills/<skill_id>/settings.json,
+    # keyed by skill_id (the dotted id), independent of where the
+    # skill's own code/venv lives. Already on /share via XDG_CONFIG_HOME.
     base = os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config"))
     return os.path.join(base, "mycroft", "skills", skill_id, "settings.json")
 
 
 @app.get("/skills/{skill_id}/settingsmeta")
-def get_settingsmeta(skill_id: str, package_name: str):
-    """Not every skill ships a settingsmeta.json — confirmed for real by
-    installing two different skills: one had it, one didn't. Callers must
-    handle has_settingsmeta: false and fall back to raw settings editing.
-    """
-    real_name = _find_installed_package(package_name)
-    if real_name is None:
-        raise HTTPException(status_code=404, detail=f"No installed package matching '{package_name}'")
+def get_settingsmeta(skill_id: str, package_name: str | None = None):
+    """Not every skill ships a settingsmeta.json -- callers must handle
+    has_settingsmeta: false and fall back to settings.json-shape-based
+    editing (see ha-ovos-integration's skill_subentry.py).
 
-    # _pip_show_files, not importlib.metadata.files() -- same reasoning
-    # as SkillProcessManager._discover's docstring; a freshly-installed
-    # package is invisible to this process's own importlib.metadata view.
-    result = _pip_show_files(real_name)
+    package_name query param is now accepted but ignored -- the
+    manifest already has the confirmed-real package name from the
+    actual install, no fuzzy matching against a possibly-wrong catalog
+    guess needed anymore.
+    """
+    manifest = _read_manifest()
+    entry = manifest.get(skill_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail=f"No installed skill '{skill_id}'")
+
+    real_name = entry["package_name"]
+    result = _pip_show_files(_venv_dir(skill_id), real_name)
     if result is None:
         raise HTTPException(status_code=404, detail=f"Package metadata not found for '{real_name}'")
     location, files = result

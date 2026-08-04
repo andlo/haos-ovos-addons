@@ -1,36 +1,85 @@
 # OVOS Skills
 
-🚧 **v0.0.x — work in progress.** See the "What was fixed on real hardware" section below
-before trusting the happy path blindly.
+🚧 **v0.0.x — work in progress.**
 
-## What it does
+## Current architecture: one isolated Python venv per skill
 
-Installs, lists, and removes OVOS skills via a small HTTP API, bridging to `ovos-core`'s own
-`SkillsStore` (`ovos_core.skill_installer`) over a private internal `ovos-messagebus` that
-never leaves this container. Not `ovos_skill_manager` (OSM) — that project's own README says
-it stopped being supported after ovos-core 0.0.8.
+Rebuilt after a real, hardware-confirmed incident: installing `skill-ovos-wolfie` pulled in a
+newer `ovos-workshop` than `ovos-core` and `ovos-skill-dictation` are compatible with,
+corrupting the single, shared `site-packages` environment every skill and `ovos-core` used to
+share. Everything below the "Historical: the old shared-site-packages design" heading
+documents that earlier design and the real bugs it took to get *it* working — kept for
+history, not current behavior.
 
-Called by [ha-ovos-integration](https://github.com/andlo/ha-ovos-integration), which manages
-skills as config subentries — one per installed skill, in the same place as everything else
-in HA.
+**No more shared Python environment, no more `ovos-core`/`ovos-messagebus`/`SkillsStore`
+dependency at all.** Each skill gets its own `virtualenv`, created fresh at install time
+directly by this add-on (`pip install <source>` into that venv, then `<venv>/bin/
+ovos-skill-launcher <skill_id>` to run it) — structurally impossible for one skill's
+dependencies to affect another's, or `ovos-core`'s own.
+
+**Persistence model — deliberately minimal.** Venvs themselves live in this container's own
+filesystem layer, which does NOT survive a rebuild/update (same underlying fact the old
+design also had to work around, just handled completely differently now). The *only* thing
+persisted to `/share/ovos-skills/manifest.json` is `{skill_id: {source, package_name}}` — a
+few bytes per skill. On every container start, every venv is rebuilt from scratch (a fresh
+`pip install <source>` per manifest entry) before any skill is launched. `settings.json` is
+untouched by any of this — it already lived on `/share` via `XDG_CONFIG_HOME`, keyed by
+`skill_id`, independent of where the skill's own code lives.
+
+This also incidentally eliminates the entire class of `importlib.metadata`-in-a-long-running-
+process unreliability the old design spent real hardware-testing time chasing (see the
+historical section) — there's no shared `site-packages` left to scan; the manifest file is
+now the sole, always-fresh-off-disk source of truth for what's installed.
 
 ## API
 
 | Endpoint | What it does |
 |---|---|
-| `GET /health` | `{"bus_connected": true/false}` |
-| `GET /catalog` | Proxies the official, curated `skills.json` feed (36 skills as of the last check) |
-| `GET /skills` | Lists installed skills — **heuristic**: pip packages named `ovos-skill-*`/`skill-*`, not a confirmed mechanism |
-| `POST /skills/install` | Body `{"url": "https://github.com/..."}`. Async — returns `{"status": "pending", "poll": "..."}` immediately, doesn't block on pip |
-| `GET /skills/install/status?key=<url or skill_id>` | Poll for the real result |
-| `DELETE /skills/{skill_id}?package_name=<hint>` | Same async pattern as install. Bypasses `SkillsStore` (see below) |
+| `GET /health` | `{"bus_connected": true}` — always true now; kept for API-shape compatibility, no messagebus connection exists to report on anymore |
+| `GET /catalog` | Proxies the official, curated `skills.json` feed |
+| `GET /skills` | `{"skills": [{"skill_id", "package_name", "source", "version"}, ...]}` — straight from the manifest, version looked up live per-skill via that skill's own venv's pip |
+| `GET /skills/running` | Per-skill process status (running/dead, PID, restart count) |
+| `POST /skills/install` | Body `{"url": "https://github.com/..."}`. Async — returns `{"status": "pending", "poll": "..."}` immediately |
+| `GET /skills/install/status?key=<url or skill_id>` | Poll for the real result; success includes the confirmed-real `skill_id` |
+| `DELETE /skills/{skill_id}` | `rm -rf` of that skill's own venv + manifest removal — no protected-package list needed anymore, a skill's venv structurally can't touch anything critical |
+| `GET /skills/{skill_id}/settingsmeta` | Unchanged shape; `package_name` query param now optional/ignored — the manifest already has the confirmed-real name |
+| `GET`/`PUT /skills/{skill_id}/settings` | Unchanged — always was independent of where the skill's code lives |
 
 ## Configuration
 
 | Option | Description |
 |---|---|
-| `allow_pip` | Gates `SkillsStore` itself — it refuses to act at all if this is off |
+| `allow_pip` | No longer read by this add-on (was `SkillsStore`'s own gate) — kept as a schema option for now, not wired to anything |
 | `log_level` | `debug`, `info`, `warning`, or `error` |
+
+## Known limitations, current design
+
+- **Reinstall-on-restart cost.** A rebuild/update means every installed skill gets a fresh
+  `git clone`/PyPI fetch + `pip install` at container start, not instant. Accepted tradeoff
+  for the isolation guarantee — see the wolfie incident above for what the alternative costs.
+- **Needs network at boot to restore previously-installed skills.** If GitHub/PyPI is
+  unreachable when the container starts, previously-working skills won't come back until
+  connectivity returns (retried by the normal container-restart path, not on a tight retry
+  loop yet).
+- **Manifest doesn't pin an exact version.** A rebuild re-fetches whatever `source` currently
+  resolves to (e.g. a git URL's default branch HEAD), not necessarily byte-identical to what
+  was running before. OVOS skills are generally not pinned to exact versions by their own
+  catalog either, so this matches the ecosystem's own looseness rather than introducing new
+  risk — but worth knowing.
+- **Disk cost of duplication.** Every venv carries its own copy of `ovos-workshop`,
+  `ovos-bus-client`, etc. — real but small (megabytes, not gigabytes) on typical HAOS
+  hardware; not sized for a Raspberry Pi Zero.
+
+---
+
+## Historical: the old shared-site-packages design
+
+Everything below this line describes the *previous* architecture (all skills sharing one
+Python environment, bridged through `ovos-core`'s own `SkillsStore`/`ovos-messagebus`) and the
+real bugs it took to get that design working on real hardware. Superseded by the venv-per-skill
+rework above — kept for history, since several of the underlying `importlib.metadata`
+findings are genuinely useful background even though the fix taken here was to sidestep the
+whole problem rather than patch it further.
 
 ## What was fixed on real hardware
 
