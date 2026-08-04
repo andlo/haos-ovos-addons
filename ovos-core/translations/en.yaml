@@ -1,0 +1,7 @@
+configuration:
+  extra_pip_packages:
+    name: "Extra pip packages"
+    description: "Space-separated pip packages to install at startup, e.g. an extra skill or plugin"
+  log_level:
+    name: "Log level"
+    description: "Verbosity of the add-on log"

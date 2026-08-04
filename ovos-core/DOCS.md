@@ -1,9 +1,13 @@
 # OVOS Core
 
-🚧 **Not built yet.** This is a skeleton (`config.yaml` only) plus a thorough writeup of a
-sandbox spike that verified the whole mechanism works end-to-end, before any add-on code was
-written. Read this before touching `Dockerfile`/`run.sh`/`api.py` — it saves re-deriving
-everything below the hard way.
+🚧 **Built, not yet deployed to real hardware.** `config.yaml`, `Dockerfile`, `run.sh`,
+`api.py`, and `translations/en.yaml` all exist. The synchronous Q&A mechanism is confirmed
+working end-to-end against a real `ovos-core` instance in a sandbox spike — including the
+actual `api.py` code running as a real HTTP server, not just the underlying bus messages
+tested manually. What's genuinely unverified: the Alpine-based Docker build itself (the spike
+ran on a Debian/Ubuntu sandbox), and everything about running in Supervisor specifically. See
+"Not yet done" at the end of this file for the full, honest list.
+
 
 ## What this add-on is for
 
@@ -15,10 +19,11 @@ the Wyoming bridges) makes OVOS components installable/configurable but not "ali
 the architecture decided for closing it (shared messagebus, `ovos-skills` staying separate,
 hot-install via that shared bus, v1/v2 scope split).
 
-## Verified in a sandbox spike, not yet packaged into this add-on
+## Verified in a sandbox spike, then confirmed again against the real `api.py`
 
 Everything below was directly run and confirmed, not assumed — see the session transcript
 if the exact commands are ever needed again.
+
 
 ### The install recipe — copied from OVOS's own official Docker image, not invented
 
@@ -108,11 +113,27 @@ CLI tool, itself confirmed present as a console script) and `ovos_workshop.skill
   # message.data = {'utterance': str, 'expect_response': bool, 'meta': {'skill': skill_id, ...}, 'lang': str}
   ```
 
-**Confirmed for real, full round trip**: emitted `recognizer_loop:utterance` with
-`"what time is it"`, received `ovos.utterance.speak` back with
-`{'utterance': 'It is ten twenty two', 'meta': {'skill': 'ovos-skill-date-time.openvoiceos'}}`
-— a genuinely correct, computed answer, not a stub. This is the exact emit-and-wait pattern
-`ovos-persona`'s `api.py` already uses (`emit_and_wait_either`) — same shape applies here.
+**Confirmed for real, full round trip, twice**: first via raw bus messages (sent
+`recognizer_loop:utterance` with `"what time is it"`, received `ovos.utterance.speak` back
+with `{'utterance': 'It is ten twenty two', ...}`), then again — the stronger confirmation —
+running the *actual* `api.py` code as a real `uvicorn` HTTP server and sending it a genuine
+`POST /ask` request:
+```
+$ curl -s http://localhost:8500/health
+{"bus_connected":true}
+$ curl -s -X POST http://localhost:8500/ask -d '{"utterance": "what day is it today"}'
+{"utterance":"It is 04 August","skill":"ovos-skill-date-time.openvoiceos"}
+```
+This is the exact emit-and-wait pattern `ovos-persona`'s `api.py` already uses
+(`emit_and_wait_either`) — same shape applies here.
+
+**Concurrent requests were NOT tested** — `api.py` serializes requests with a module-level
+lock rather than matching responses to requests via OVOS's session system
+(`context["session"]["session_id"]`, which a skill's `speak()` call propagates via
+`message.forward()`). That session-based approach is plausible from reading the source, but
+unverified, so `api.py` doesn't rely on it yet — see its own docstring for the reasoning. A
+lock means concurrent requests queue instead of racing to claim the wrong answer; revisit once
+concurrency genuinely matters.
 
 **Not yet decided**: skills-first-then-fallback routing (per `DEVELOPER.md`'s v1 scope) isn't
 built — this spike only confirmed a single skill answering directly. `ovos-core`'s own
@@ -132,15 +153,27 @@ this session.
 
 ## Not yet done
 
-- No `Dockerfile`/`run.sh`/`api.py` written — this is a skeleton `config.yaml` only.
+- **The Alpine-based Docker build itself is unverified.** The sandbox spike ran on a
+  Debian/Ubuntu sandbox — good enough to confirm the *mechanism* (install recipe, skill
+  discovery, the Q&A round trip via the real `api.py`), but the actual `docker build` on
+  Alpine has never run. Specific known risk: `fann-dev` (needed for the `[lgpl]` extra's
+  `fann2` wheel) is confirmed to exist in Alpine's `community` repository via
+  pkgs.alpinelinux.org, but whether HA's `ghcr.io/home-assistant/base:latest` has `community`
+  enabled by default hasn't been checked — first real build on the NUC is the actual test.
+- **The shared-bus binding (`websocket.host: 0.0.0.0`) is unverified for real
+  container-to-container traffic.** `run.sh` sets it, reasoning from `ovos-skills` never
+  needing to (its bus is deliberately private, defaults are enough there) — but the sandbox
+  spike only ever tested bus access from within the same container/process. First real test of
+  actual cross-container reachability is wiring `ovos-skills` to point at this bus.
 - Skills-first vs. fallback routing logic (v1 scope from `DEVELOPER.md`) unbuilt and untested.
 - Hot-install via the shared bus (`ovos-skills` emitting `ovos.skills.install.complete` onto
   *this* add-on's bus instead of its own private one) — `ovos-skills` itself hasn't been
   changed to point at a shared bus yet; still using its own private, internal one.
-- `/share/mycroft/mycroft.conf` integration for this add-on specifically — not yet checked
-  whether `ovos-core`'s own config loading conflicts with or needs anything different from the
-  convention the other four add-ons already share.
+- `/share/mycroft/mycroft.conf` integration beyond the `websocket` block `run.sh` writes — not
+  yet checked whether `ovos-core`'s own config loading conflicts with or needs anything
+  different from the convention the other four add-ons already share.
 - v2 (proactive speech via `assist_satellite.announce`) — explicitly out of scope until v1
   exists, per `DEVELOPER.md`.
 - HA conversation-agent side: nothing built yet on the `ha-ovos-integration` side to actually
-  call this add-on's future synchronous endpoint as a conversation agent.
+  call this add-on's `/ask` endpoint as a conversation agent.
+- Concurrent request handling (see above) — serialized via a lock, not session-matched.
