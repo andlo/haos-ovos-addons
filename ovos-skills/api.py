@@ -255,7 +255,9 @@ def install_status(key: str):
 
 
 def _run_uninstall_job(job_key: str, package_name: str):
+    LOG.warning(f"UNINSTALL DEBUG: starting uninstall of package_name='{package_name}' for job_key='{job_key}'")
     ok, error = _direct_pip_uninstall(package_name)
+    LOG.warning(f"UNINSTALL DEBUG: finished, ok={ok}, error='{error}'")
     if ok:
         jobs[job_key] = {"status": "complete"}
     else:
@@ -327,8 +329,11 @@ def _remove_persisted_package(package_name: str) -> None:
     try:
         files = importlib.metadata.files(package_name) or []
     except importlib.metadata.PackageNotFoundError:
+        LOG.warning(f"UNINSTALL DEBUG: _remove_persisted_package: PackageNotFoundError for '{package_name}'")
         return
+    LOG.warning(f"UNINSTALL DEBUG: _remove_persisted_package: found {len(files)} files for '{package_name}'")
     sp_dir = _site_packages_dir()
+    removed = 0
     for f in files:
         src = str(f.locate())
         try:
@@ -340,6 +345,8 @@ def _remove_persisted_package(package_name: str) -> None:
         target = os.path.join(PERSIST_DIR, rel)
         if os.path.isfile(target):
             os.remove(target)
+            removed += 1
+    LOG.warning(f"UNINSTALL DEBUG: _remove_persisted_package: removed {removed} persisted files for '{package_name}'")
 
 
 def _direct_pip_uninstall(package_name: str) -> tuple[bool, str]:
@@ -370,10 +377,15 @@ def _direct_pip_uninstall(package_name: str) -> tuple[bool, str]:
     # way, reporting success while silently uninstalling from the wrong
     # place, before switching to this.
     cmd = [sys.executable, "-m", "pip", "uninstall", "-y", "--break-system-packages", package_name]
+    LOG.warning(f"UNINSTALL DEBUG: running command: {cmd}")
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
     except subprocess.TimeoutExpired:
         return False, "pip uninstall timed out"
+
+    LOG.warning(f"UNINSTALL DEBUG: returncode={result.returncode}")
+    LOG.warning(f"UNINSTALL DEBUG: stdout={result.stdout}")
+    LOG.warning(f"UNINSTALL DEBUG: stderr={result.stderr}")
 
     if result.returncode != 0:
         return False, (result.stderr or result.stdout or "pip uninstall failed").strip()
