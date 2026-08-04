@@ -12,8 +12,19 @@ CONF_FILE="${CONF_DIR}/mycroft.conf"
 mkdir -p "${CONF_DIR}"
 [ -f "${CONF_FILE}" ] || echo '{}' > "${CONF_FILE}"
 
+# SkillsStore's default constraints file (OVOS's own "stable" pin list) was
+# found stale on real hardware: it pinned ovos-skill-date-time<0.5.0 while
+# the skill's actual dev-branch HEAD is 1.1.14a2, so installing anything
+# via the default constraints failed immediately with ResolutionImpossible.
+# Point it at an empty local file instead — pip still requires a valid,
+# existing constraints file (that's what validate_constraints() checks),
+# an empty one just contains zero actual pins.
+EMPTY_CONSTRAINTS="/etc/ovos-empty-constraints.txt"
+: > "${EMPTY_CONSTRAINTS}"
+
 jq --argjson allow "$([ "${ALLOW_PIP}" = "true" ] && echo true || echo false)" \
-  '. + {skills: ((.skills // {}) + {installer: (((.skills // {}).installer // {}) + {allow_pip: $allow, break_system_packages: true})})}' \
+  --arg constraints "${EMPTY_CONSTRAINTS}" \
+  '. + {skills: ((.skills // {}) + {installer: (((.skills // {}).installer // {}) + {allow_pip: $allow, break_system_packages: true, constraints: $constraints})})}' \
   "${CONF_FILE}" > "${CONF_FILE}.tmp" && mv "${CONF_FILE}.tmp" "${CONF_FILE}"
 
 bashio::log.info "Starting internal ovos-messagebus"

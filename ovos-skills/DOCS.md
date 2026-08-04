@@ -41,6 +41,14 @@ in HA.
    finished — timed out against a 30s client, and would've been a poor fit for eventually
    being called from a HA config flow (which expects quick responses). Rebuilt as
    fire-and-poll instead.
+3. **`SkillsStore`'s default constraints file is stale.** It pins
+   `ovos-skill-date-time<0.5.0,>=0.4.20`, but that skill's actual `dev`-branch HEAD is
+   `1.1.14a2` — installing it via the default "stable" pin list fails immediately with
+   `ResolutionImpossible`. This is an upstream OVOS release-management gap (the pin list
+   hasn't tracked the skill repo's own state), not a bug on our side. Worked around by
+   pointing `skills.installer.constraints` at an empty local file instead of OVOS's default
+   URL — `SkillsStore` still requires a valid, existing constraints file, an empty one just
+   pins nothing.
 
 ## Known limitations
 
