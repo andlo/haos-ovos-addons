@@ -237,6 +237,24 @@ def health():
     return {"bus_connected": bool(bus and bus.connected_event.is_set())}
 
 
+@app.get("/debug/is-ready")
+def debug_is_ready():
+    """TEMPORARY: test whether ovos-core's own skill-manager actually
+    replies "ready" to mycroft.skills.is_ready over the shared bus --
+    every launched skill process is stuck logging "Skills service not
+    ready yet", so testing this directly rather than guessing why.
+    Remove once resolved.
+    """
+    from ovos_bus_client import Message
+    response = bus.wait_for_response(
+        Message("mycroft.skills.is_ready", context={"source": "debug", "destination": "skills"}),
+        timeout=5,
+    )
+    if response is None:
+        return {"got_response": False}
+    return {"got_response": True, "data": response.data}
+
+
 @app.get("/skills/running")
 def running_skills():
     """Status of every skill process this container is currently
