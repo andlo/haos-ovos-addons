@@ -223,9 +223,7 @@ def install_status(key: str):
 
 
 def _run_uninstall_job(job_key: str, package_name: str):
-    LOG.warning(f"UNINSTALL DEBUG2: package_name='{package_name}' for job_key='{job_key}'")
     ok, error = _direct_pip_uninstall(package_name)
-    LOG.warning(f"UNINSTALL DEBUG2: finished, ok={ok}, error='{error}'")
     if ok:
         jobs[job_key] = {"status": "complete"}
     else:
@@ -331,6 +329,53 @@ def _remove_persisted_package(package_name: str) -> None:
             os.remove(target)
 
 
+def _manual_remove_package(package_name: str) -> tuple[bool, str]:
+    """Fallback for when `pip uninstall` refuses with "no RECORD file was
+    found" — confirmed for real that our persist/restore cycle doesn't
+    reliably preserve a package's RECORD file intact (pip's own error
+    message names the exact package and file it's missing). Deletes the
+    package directly: find its dist-info dir by PEP 503 normalized-name
+    match (dist-info dirs are named <normalized_name>-<version>.dist-info,
+    with '_' in the name and '-' only as the version separator — mixing
+    those up was an earlier bug in this same function, caught by testing
+    against a real dist-info dir before trusting it), read its
+    top_level.txt for the actual module name(s), remove both.
+    """
+    import re
+
+    sp_dir = _site_packages_dir()
+
+    def norm(s: str) -> str:
+        return s.lower().replace("-", "_")
+
+    target_norm = norm(package_name)
+    removed = False
+    for entry in os.listdir(sp_dir):
+        if not entry.endswith(".dist-info"):
+            continue
+        m = re.match(r"^(.+?)-[^-]+\.dist-info$", entry)
+        if not m or norm(m.group(1)) != target_norm:
+            continue
+        dist_info_path = os.path.join(sp_dir, entry)
+        top_level_file = os.path.join(dist_info_path, "top_level.txt")
+        module_names = []
+        if os.path.isfile(top_level_file):
+            with open(top_level_file) as f:
+                module_names = [line.strip() for line in f if line.strip()]
+        shutil.rmtree(dist_info_path, ignore_errors=True)
+        removed = True
+        for mod in module_names:
+            mod_path = os.path.join(sp_dir, mod)
+            if os.path.isdir(mod_path):
+                shutil.rmtree(mod_path, ignore_errors=True)
+            elif os.path.isfile(mod_path + ".py"):
+                os.remove(mod_path + ".py")
+
+    if removed:
+        return True, ""
+    return False, f"Could not find a dist-info directory for '{package_name}' to manually remove"
+
+
 def _direct_pip_uninstall(package_name: str) -> tuple[bool, str]:
     """Bypasses SkillsStore/the messagebus entirely. Its own uninstall is
     a stub on the current PyPI ovos-core — already fixed in ovos-core's
@@ -359,17 +404,22 @@ def _direct_pip_uninstall(package_name: str) -> tuple[bool, str]:
     # way, reporting success while silently uninstalling from the wrong
     # place, before switching to this.
     cmd = [sys.executable, "-m", "pip", "uninstall", "-y", "--break-system-packages", package_name]
-    LOG.warning(f"UNINSTALL DEBUG2: cmd={cmd}")
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
     except subprocess.TimeoutExpired:
         return False, "pip uninstall timed out"
 
-    LOG.warning(f"UNINSTALL DEBUG2: rc={result.returncode} stdout={result.stdout!r} stderr={result.stderr!r}")
+    if result.returncode == 0:
+        return True, ""
 
-    if result.returncode != 0:
-        return False, (result.stderr or result.stdout or "pip uninstall failed").strip()
-    return True, ""
+    stderr = (result.stderr or result.stdout or "").strip()
+    if "no RECORD file was found" in stderr:
+        # confirmed for real: our persist/restore cycle doesn't always
+        # keep RECORD intact — fall back to direct removal instead of
+        # failing outright.
+        return _manual_remove_package(package_name)
+
+    return False, stderr or "pip uninstall failed"
 
 
 def _settings_path(skill_id: str) -> str:
