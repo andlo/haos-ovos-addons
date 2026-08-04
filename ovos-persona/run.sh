@@ -7,6 +7,15 @@ if [ -n "${EXTRA_PIP}" ]; then
   pip install --no-cache-dir --break-system-packages ${EXTRA_PIP}
 fi
 
+# persona.json (solver list) stays add-on-private, not shared with the
+# other three add-ons — but sess.lang and other session defaults still
+# come from ovos-config's Configuration(), so point that at the same
+# shared mycroft.conf the others read/write, in case lang/location was
+# set there (via a future ha-ovos-integration or another add-on).
+export XDG_CONFIG_HOME=/share
+mkdir -p /share/mycroft
+[ -f /share/mycroft/mycroft.conf ] || echo '{}' > /share/mycroft/mycroft.conf
+
 # bashio config arrays -> newline separated, turn into a JSON array
 SOLVERS_JSON=$(bashio::config 'solvers' | jq -R . | jq -s .)
 

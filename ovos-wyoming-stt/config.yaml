@@ -1,5 +1,5 @@
 name: "OVOS Wyoming STT"
-version: "0.0.1"
+version: "0.0.2"
 slug: "ovos_wyoming_stt"
 description: "Expose an OVOS speech-to-text plugin via Wyoming for use in Assist pipelines"
 url: "https://github.com/andlo/haos-ovos-addons/tree/master/ovos-wyoming-stt"
@@ -9,6 +9,8 @@ arch:
 init: false
 startup: services
 boot: auto
+map:
+  - share:rw
 ports:
   10300/tcp: 10300
 ports_description:

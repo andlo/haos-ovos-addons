@@ -1,5 +1,5 @@
 name: "OVOS Wyoming Wakeword"
-version: "0.0.4"
+version: "0.0.5"
 slug: "ovos_wyoming_wakeword"
 description: "Expose OVOS wake word plugins via Wyoming for use in Assist pipelines"
 url: "https://github.com/andlo/haos-ovos-addons/tree/master/ovos-wyoming-wakeword"
@@ -9,6 +9,8 @@ arch:
 init: false
 startup: services
 boot: auto
+map:
+  - share:rw
 ports:
   10400/tcp: 10400
 ports_description:

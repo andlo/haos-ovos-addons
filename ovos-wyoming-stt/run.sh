@@ -9,14 +9,17 @@ if [ -n "${EXTRA_PIP}" ]; then
   pip install --no-cache-dir --break-system-packages ${EXTRA_PIP}
 fi
 
-CONF_DIR="${HOME:-/root}/.config/mycroft"
+export XDG_CONFIG_HOME=/share
+CONF_DIR="/share/mycroft"
+CONF_FILE="${CONF_DIR}/mycroft.conf"
 mkdir -p "${CONF_DIR}"
+[ -f "${CONF_FILE}" ] || echo '{}' > "${CONF_FILE}"
 
-jq -n \
+jq \
   --arg plugin "$PLUGIN" \
   --argjson pconf "$PLUGIN_CONFIG" \
-  '{stt: ({module: $plugin} + {($plugin): $pconf})}' \
-  > "${CONF_DIR}/mycroft.conf"
+  '. + {stt: ({module: $plugin} + {($plugin): $pconf})}' \
+  "${CONF_FILE}" > "${CONF_FILE}.tmp" && mv "${CONF_FILE}.tmp" "${CONF_FILE}"
 
 (
   until (exec 3<>/dev/tcp/localhost/10300) 2>/dev/null; do sleep 0.5; done
