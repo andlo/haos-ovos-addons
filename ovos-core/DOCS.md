@@ -1,19 +1,20 @@
 # OVOS Core
 
-🚧 **Built, deployed, and one deep bug found and fixed.** `config.yaml`, `Dockerfile`,
-`run.sh`, `api.py`, and `translations/en.yaml` all exist. The synchronous Q&A mechanism was
-confirmed working end-to-end in a sandbox spike — but real Supervisor deployment on Alpine hit
-a genuine, reproducible bug: `/ask` hung indefinitely. See "The Alpine hang" below for the
-full investigation and the fix (switching this one add-on's base image to Debian). What's
-still unverified: the actual Debian-based build on real hardware (the fix was reasoned and
-implemented but not yet rebuilt/retested at the time of writing — do that first, next
-session). See "Not yet done" at the end of this file for the full, honest list.
+🚧 **Built, deployed, working end-to-end on real hardware.** `config.yaml`, `Dockerfile`,
+`run.sh`, `api.py`, and `translations/en.yaml` all exist. Confirmed for real: `POST /ask
+{"utterance": "what time is it"}` → `{"utterance": "Currently quarter past eight", "skill":
+"ovos-skill-date-time.openvoiceos"}`, returned in under a second. Getting here took a long,
+genuinely twisty investigation — what looked like an infinite hang turned out to be a real
+performance problem with an easy fix once correctly diagnosed. See "The investigation: hang,
+Alpine, or just slow?" below for the full trail, including two reasonable-looking fixes that
+turned out not to be the actual cause. See "Not yet done" at the end of this file for what's
+still open.
 
-## The Alpine hang — a real, reproducible bug and its fix
+## The investigation: hang, Alpine, or just slow?
 
 **Symptom**: `/ask` with `"what time is it"` (a skill genuinely installed, loaded, and ready —
-confirmed via logs) never returned anything. Not a slow response, not an error — the
-underlying `ovos_core.intent_services.service:handle_utterance` logged `"Parsing utterance:
+confirmed via logs) never returned anything within any timeout tried, up to 70+ seconds. Not
+an error — `ovos_core.intent_services.service:handle_utterance` logged `"Parsing utterance:
 [...]"` and then nothing else, ever, for 70+ seconds. No match, no `complete_intent_failure`,
 no fallback, no timeout, no exception. `/health` confirmed the messagebus connection stayed
 up throughout.
@@ -45,9 +46,9 @@ up throughout.
    `create_daemon()` — a genuine background thread that structurally cannot block
    `handle_utterance`'s own return, so it was never a viable culprit even before testing.
 
-**What actually found it**: SSH access to a real, independently-running OVOS installation
-(`ovos-installer`-based Docker deployment, 10 days uptime, `ovos_core` container marked
-`healthy`) that answers `"what time is it"` correctly. Two things stood out on direct
+**What actually found the real trail**: SSH access to a real, independently-running OVOS
+installation (`ovos-installer`-based Docker deployment, 10 days uptime, `ovos_core` container
+marked `healthy`) that answers `"what time is it"` correctly. Two things stood out on direct
 comparison:
 
 - `docker exec ovos_core cat /etc/os-release` → **Debian GNU/Linux 13 (trixie)**, not Alpine.
@@ -55,42 +56,55 @@ comparison:
   image. Confirmed via Docker Hub: `smartgic/ovos-core`'s own badges list a "Debian version",
   never Alpine.
 
-The installed package versions on that known-good box were also markedly older
-(`ovos_core==2.1.2a1` vs. our `2.6.0a1`, `ovos_bus_client==1.3.8a4` vs. `2.7.3a1`) — a second,
-real difference, but not the one landed on as primary: version drift alone doesn't explain why
-our *own* sandbox spike (same `2.6.0a1`, same Debian/Ubuntu-family OS) worked correctly while
-the Alpine Supervisor build hung. Holding the OS/libc constant and varying only the version
-wasn't tested directly, so a version-only explanation can't be fully ruled out — but the
-OS/libc difference is the one variable that's different between "sandbox spike (worked)" and
-"Supervisor build (hung)" while everything else (recipe, versions, config) was identical.
+This looked like the answer: `ovos-core[lgpl]` pulls in Padatious, a C++ library (via SWIG
+bindings) built against `fann2`, and Alpine's `musl` libc vs. glibc is a known source of
+subtle misbehavior in compiled C/C++ extensions. **Switched this add-on's base image to
+Debian** (`ghcr.io/home-assistant/${BUILD_ARCH}-base-debian:latest`, using the `BUILD_ARCH`
+build arg for multi-arch since `build.yaml`'s `build_from` is deprecated as of Supervisor's
+2026.04 builder migration) — rebuilt, retested on real hardware.
 
-**Why this is plausible mechanically**: `ovos-core[lgpl]` pulls in Padatious, a C++
-library (via SWIG bindings) built against `fann2`. Alpine's `musl` libc vs. glibc is a known,
-recurring source of subtle, silent misbehavior in compiled C/C++ extensions — not a crash,
-which would show up in logs, but a hang, which is exactly what was observed. A Home Assistant
-Community forum thread turned up during this investigation describes the same *class* of
-problem independently: a compiled binary dependency failing on Alpine, working fine rebuilt
-on Debian.
+**Same exact symptom, unchanged, on Debian.** This ruled out Alpine/musl as the cause. The fix
+was reasonable given the evidence at the time, but wrong — worth recording *why* it looked
+right, not just that it wasn't: matching OVOS's own official platform choice was a genuinely
+sound inference, it just wasn't the actual variable that mattered here.
 
-**The fix**: this add-on's `Dockerfile` now builds `FROM
-ghcr.io/home-assistant/${BUILD_ARCH}-base-debian:latest` instead of the Alpine
-`ghcr.io/home-assistant/base:latest` every other add-on in this project uses. Deliberate,
-documented, narrow exception — see the Dockerfile's own comment for the reasoning. The other
-five add-ons stay on Alpine: none of them carry `ovos-core[lgpl]`'s specific compiled
-dependency, the one piece of this puzzle with concrete evidence of Alpine-specific
-misbehavior, and HA's own docs are explicit that Alpine is the preferred, idiomatic base for
-apps in general — this is a targeted deviation for a specific, evidenced reason, not a
-project-wide change.
+**The real cause, found by testing the "is it just slow?" hypothesis directly**: widened
+`/debug/ask-verbose`'s listen window to 180s (up from the original 5s/60s) and checked
+`ovos-core`'s own log timestamps across that window instead of assuming a fixed short
+timeout was enough. Found exactly **90 seconds** between `"Parsing utterance: [...]"` and the
+next log line (`ovos-padatious-pipeline-plugin-high match ...`) — reproduced twice, consistent
+each time. It was never hanging. Padatious's matching genuinely took 80-90+ seconds *per
+utterance* on this specific hardware (a weak NUC) — instant on the sandbox and the known-good
+VM, both presumably running on stronger CPUs. No bug in `ovos-core` at all; a real, measured
+performance ceiling on this specific device for this specific matcher.
 
-**Multi-arch note**: `build.yaml`'s `build_from` mechanism is deprecated as of Supervisor's
-2026.04 builder migration — base images are now set directly via `FROM` in the Dockerfile,
-using the `BUILD_ARCH` build arg Supervisor provides automatically
-(`ghcr.io/home-assistant/${BUILD_ARCH}-base-debian:latest` resolves correctly for both
-`amd64` and `aarch64`, confirmed both image variants exist).
+**The actual fix**: switch the intent matcher, not the OS. `padacioso` is a lightweight,
+pure-Python drop-in replacement for `padatious` — same `.intent` file format, same
+registration bus messages (`padatious:register_intent` etc., confirmed by reading
+`padacioso.opm.PadaciosoPipeline.__init__` directly), simple fuzzy-matching instead of a
+trained neural model. It was already installed the whole time (a transitive dependency of
+`ovos-core[plugins]`, registers its own `ovos-padacioso-pipeline-plugin` entry point) but
+never actually used — `ovos-config`'s own shipped default `intents.pipeline` list only
+includes `ovos-padatious-pipeline-plugin-high`, nothing padacioso-related. `run.sh` now
+overrides `intents.pipeline` explicitly, swapping padacioso in at the same priority slot
+padatious held. Confirmed for real: `POST /ask {"utterance": "what time is it"}` → correct
+answer, under a second, no timeout needed.
 
-**Not yet done**: rebuild and retest on real hardware with this fix. Everything above is the
-investigation and the reasoned fix; the actual Debian-based `docker build` succeeding, and
-`/ask` returning a real answer, has not yet been confirmed at the time of writing.
+**Kept anyway, on their own merits**:
+- The **Debian base image** — didn't fix the hang, but no reason to revert it either; it's a
+  legitimate, documented choice (matches OVOS's own official platform) and reverting would
+  reintroduce an untested variable for no benefit now that the real fix is elsewhere. If this
+  ever feels worth revisiting, do it deliberately, not as a leftover.
+- The **`intents.blacklisted_pipelines`** entry (`ovos-common-query-pipeline-plugin`,
+  `ovos-persona-pipeline-plugin`) added while testing (and ruling out) a hanging-network-call
+  hypothesis — harmless to leave, and both are genuinely out of scope for this add-on today
+  (they need external services not set up here).
+
+**What this means for real skill performance**: `padacioso`'s fuzzy matching is simpler than
+padatious's trained model — likely less accurate on ambiguous or loosely-phrased utterances,
+a real trade-off, not a free lunch. Worth keeping in mind once more skills are installed and
+real usage patterns emerge — this was the right call for "usably fast at all" over "maximally
+accurate but 90 seconds per question," but it's a trade-off, not a strict improvement.
 
 
 ## What this add-on is for
@@ -237,22 +251,25 @@ this session.
 
 ## Not yet done
 
-- **The Debian-based Docker build (the Alpine-hang fix) is unverified.** Reasoned and
-  implemented (see "The Alpine hang" above), but not yet rebuilt/retested on real hardware at
-  the time of writing. First priority next session.
-- **Temporary debug endpoints still in `api.py`** (`/debug/skill-files`, `/debug/mycroft-conf`,
-  `/debug/ask-verbose`, `/debug/processes`, `/debug/versions`) — leave them in until the
-  Debian fix is confirmed working end-to-end (they may be needed again if it isn't), then
-  remove.
+- **Remove the temporary debug endpoints from `api.py`** (`/debug/skill-files`,
+  `/debug/mycroft-conf`, `/debug/ask-verbose`, `/debug/processes`, `/debug/versions`,
+  `/debug/network`) — the investigation is resolved, `/ask` confirmed working end-to-end, so
+  these have served their purpose. Clean up next session.
+- **Lower `ASK_TIMEOUT` back down from 150s.** It was raised during the investigation on the
+  (wrong) assumption padatious's 90s was the expected cost; now that padacioso is the actual
+  matcher and answers in under a second, 150s is far more headroom than needed — pick
+  something more realistic (a few seconds) once confirmed stable across a few more test
+  utterances.
 - **The shared-bus binding (`websocket.host: 0.0.0.0`) is unverified for real
   container-to-container traffic.** `run.sh` sets it, reasoning from `ovos-skills` never
-  needing to (its bus is deliberately private, defaults are enough there) — but neither the
-  sandbox spike nor the Alpine-hang investigation tested bus access from a genuinely separate
-  container. First real test is wiring `ovos-skills` to point at this bus.
+  needing to (its bus is deliberately private, defaults are enough there) — but nothing so far
+  has tested bus access from a genuinely separate container. First real test is wiring
+  `ovos-skills` to point at this bus.
 - `intents.blacklisted_pipelines` currently blacklists `ovos-common-query-pipeline-plugin` and
-  `ovos-persona-pipeline-plugin` in `run.sh` — added to test (and rule out) the
-  hanging-network-call hypothesis during the Alpine-hang investigation. Harmless to leave, but
-  reconsider once the Debian fix is confirmed: those pipelines may be worth having back.
+  `ovos-persona-pipeline-plugin` in `run.sh` — kept deliberately (see "Kept anyway, on their
+  own merits" above), not a loose end.
+- **`padacioso`'s accuracy trade-off** (see above) is unverified beyond this one utterance —
+  worth testing against a wider range of phrasings once more skills are installed.
 - Skills-first vs. fallback routing logic (v1 scope from `DEVELOPER.md`) unbuilt and untested.
 - Hot-install via the shared bus (`ovos-skills` emitting `ovos.skills.install.complete` onto
   *this* add-on's bus instead of its own private one) — `ovos-skills` itself hasn't been
