@@ -265,6 +265,17 @@ def health():
     return {"bus_connected": bool(bus and bus.connected_event.is_set())}
 
 
+@app.post("/debug/wipe-persisted")
+def debug_wipe_persisted():
+    """TEMPORARY -- clear PERSIST_DIR entirely, for a clean-slate reset
+    ahead of removing/reinstalling this add-on. See DEVELOPER.md.
+    """
+    if os.path.isdir(PERSIST_DIR):
+        shutil.rmtree(PERSIST_DIR)
+        return {"status": "wiped", "dir": PERSIST_DIR}
+    return {"status": "already empty", "dir": PERSIST_DIR}
+
+
 @app.get("/debug/check-discovery")
 def debug_check_discovery(package: str):
     """TEMPORARY -- verify the new subprocess-based helpers actually
