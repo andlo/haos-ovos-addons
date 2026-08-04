@@ -223,7 +223,9 @@ def install_status(key: str):
 
 
 def _run_uninstall_job(job_key: str, package_name: str):
+    LOG.warning(f"UNINSTALL DEBUG2: package_name='{package_name}' for job_key='{job_key}'")
     ok, error = _direct_pip_uninstall(package_name)
+    LOG.warning(f"UNINSTALL DEBUG2: finished, ok={ok}, error='{error}'")
     if ok:
         jobs[job_key] = {"status": "complete"}
     else:
@@ -349,10 +351,13 @@ def _direct_pip_uninstall(package_name: str) -> tuple[bool, str]:
     # way, reporting success while silently uninstalling from the wrong
     # place, before switching to this.
     cmd = [sys.executable, "-m", "pip", "uninstall", "-y", "--break-system-packages", package_name]
+    LOG.warning(f"UNINSTALL DEBUG2: cmd={cmd}")
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
     except subprocess.TimeoutExpired:
         return False, "pip uninstall timed out"
+
+    LOG.warning(f"UNINSTALL DEBUG2: rc={result.returncode} stdout={result.stdout!r} stderr={result.stderr!r}")
 
     if result.returncode != 0:
         return False, (result.stderr or result.stdout or "pip uninstall failed").strip()
