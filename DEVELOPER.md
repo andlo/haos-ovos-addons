@@ -100,6 +100,22 @@ Genuinely not meaningful until `ovos-core` exists — an installed skill is iner
 now, no matter how good it is, since nothing loads or runs it. Worth deciding once the runtime
 is real, not before.
 
+### `ovos-core` add-on: skeleton scaffolded, sandbox spike confirmed the mechanism works
+
+`config.yaml` exists (`ovos-core/`); `Dockerfile`/`run.sh`/`api.py` don't yet. Before writing
+those, a full sandbox spike confirmed the whole chain works end-to-end — see `ovos-core/DOCS.md`
+for the complete writeup (exact install recipe copied from OVOS's own official Docker image,
+the `swig2.0` build quirk, the ~90s first-boot model-download caveat that initially looked like
+a stuck upstream bug but wasn't, and the exact bus messages for the synchronous Q&A mechanism).
+Headline result, confirmed for real, not assumed: sent `"what time is it"` in, got back
+`"It is ten twenty two"` from a genuinely running `ovos-skill-date-time`, computed correctly.
+
+Also considered mid-spike: an HA-aware PHAL plugin, raised as a possible fix for what looked
+like stuck skill loading (PHAL normally reports network/internet status to `ovos-core`). Turned
+out not to be the actual cause, but the idea itself — giving OVOS awareness of HA, or exposing
+HA entities as OVOS "hardware" concepts — is separate and self-contained, worth keeping for
+later, not evaluated further this session.
+
 ## Original 3-repo plan (superseded, kept for history)
 
 The original idea was three repos: this one, a forked `ovos-skill-browser` for browsing/installing
