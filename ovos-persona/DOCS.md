@@ -33,22 +33,48 @@ entry points directly:
   `opm.agents.retrieval` entry point, not `opm.solver.question` — **not usable** by
   `ovos-persona-server` as-is. Dropped from defaults until a compatible package is found.
 
-## Upstream bugs found while packaging this (both filed)
+## Upstream bugs found while packaging this (both filed, both merged)
 
 1. **PyPI release is stale.** `ovos-persona-server` 0.5.0 on PyPI is missing the
    `ovos_persona_server/schemas` submodule entirely (crashes on import) and under-declares
-   dependencies (`ovos-workshop`, `uvicorn`) that the `dev` branch's `pyproject.toml` already
-   lists. Workaround: install straight from `git@dev` instead of PyPI (see `Dockerfile`).
+   dependencies (`ovos-workshop`, `uvicorn`) that `dev`'s `pyproject.toml` already lists.
+   Still unfixed on PyPI as of this writing — see the pinned-commit note below for why we
+   don't just track `@dev` to get around it.
 2. **Chat completions crashed for QuestionSolver-based plugins.**
    `run_chat()`/`run_stream()`'s stateless path passed raw OpenAI-style message dicts straight
-   to `Persona.chat`/`stream`, whose type contract is `List[AgentMessage]` — any
-   QuestionSolver-based plugin then crashed on `messages[-1].content` (`'dict' object has no
-   attribute 'content'`), surfacing to callers as a confusing `'NoneType' object has no
-   attribute 'split'`. Fixed with a build-time patch (`patch_persona.py`) until merged upstream.
-   - Upstream PR: [OpenVoiceOS/ovos-persona-server#67](https://github.com/OpenVoiceOS/ovos-persona-server/pull/67)
-   - **Once merged and released**, remove `patch_persona.py` and its `Dockerfile` step, and
-     switch the install back to plain `ovos-persona-server` from PyPI once a release exists
-     that includes both this fix and the `schemas` submodule.
+   to `Persona.chat`/`stream`, whose type contract is `List[AgentMessage]`.
+   Upstream PR: [OpenVoiceOS/ovos-persona-server#67](https://github.com/OpenVoiceOS/ovos-persona-server/pull/67)
+   — **merged**. No local patch needed for this specific bug anymore.
+
+## Why we install a pinned commit, not `@dev`
+
+Tracking `git+...@dev` proved genuinely unstable *within a single session*: PR #67's fix was
+confirmed working end-to-end for hours, then the exact same symptom came back on a later
+rebuild — not because the fix regressed, but because `ovos-persona-server` declares its own
+`ovos-persona` dependency as an unpinned alpha range (`>=0.9.0a6`), and that dependency kept
+publishing new alphas in between that added new default-loaded solver plugins (`ovos-solver-
+bm25-*`, `ovos-solver-yes-no-plugin`, `ovos-solver-bus-plugin`, `ovos-chat-openai-plugin`) —
+none of which are `QuestionSolver`-shaped, so they lack the `.priority` attribute
+`QuestionSolversService.modules`'s sort needs, crashing every chat completion with
+`AttributeError: 'OpenAIChatEngine' object has no attribute 'priority'`, unrelated to PR #67
+itself.
+
+Fixed two ways together, confirmed in a clean venv against the real `run_chat()` call path
+(not just the lower-level solver service) before deploying:
+- **Pinned to the exact commit that merged PR #67**
+  (`5daafb675520398a888833443e4adecca7e97b58`), not the floating branch.
+- **`solver_config` explicitly disables the polluting plugins** (`enabled: false` for each) —
+  this is the part that actually matters going forward, since it makes the add-on robust to
+  *future* alpha churn adding yet more default-loaded plugins, not just today's known list.
+
+**Also found, not fixed**: a real but non-fatal argument-order bug in a *third* repo,
+`OpenVoiceOS/ovos-persona`'s own `Persona.chat()` — it calls
+`self.solvers.chat_completion(messages, sess.lang, sess.system_unit)` positionally, but
+`chat_completion`'s signature is `(messages, session_id, lang, units)`, so `sess.lang` lands
+in `session_id` and `sess.system_unit` lands in `lang`. Confirmed live: logs
+`ERROR - Expected a language code, got 'metric'`. Doesn't crash — `FailureSolver` ignores
+`lang` entirely (see "404" below) — but does mean any *working* solver currently gets the
+wrong language. Not filed upstream yet; revisit alongside the schemas/PyPI staleness issue.
 
 ## Known limitations
 
