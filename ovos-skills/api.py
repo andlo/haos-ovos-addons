@@ -263,33 +263,34 @@ def _find_installed_package(hint: str) -> str | None:
     as skill-ovos-fallback-chatgpt). Normalized exact match first, then a
     unique-substring fallback, rather than trusting the hint literally.
 
-    Reloads importlib.metadata AND invalidates the path finder cache
-    first — confirmed via explicit logging on real hardware that
-    reload() alone genuinely wasn't enough: a real skill, on disk and
-    shown by `pip list`, was completely absent from
-    importlib.metadata.distributions() (85 packages seen, this one not
-    among them) even after reload(). The site-packages directory has
-    been scanned repeatedly since process start (every earlier import),
-    unlike a freshly sys.path-inserted directory — its FileFinder cache
-    needs invalidate_caches(), not just reloading the metadata module
-    itself. This caused uninstall to fall back to a guessed package name
-    that doesn't exist, reporting success while touching nothing.
+    Uses `pip list` via a fresh subprocess, NOT importlib.metadata run
+    inside this process — confirmed the hard way, with explicit logging,
+    that importlib.metadata.distributions() genuinely doesn't see
+    packages restored via run.sh's file-copy even after BOTH
+    importlib.invalidate_caches() AND reload(importlib.metadata) (85
+    packages seen, the target skill not among them), while a fresh `pip
+    list` subprocess sees it correctly every time — same mechanism the
+    /skills endpoint already relies on successfully. Whatever the exact
+    Python internals are, a long-running process's own view of
+    site-packages is not trustworthy here; a fresh subprocess's is.
     """
-    global importlib
-    importlib.invalidate_caches()
-    importlib.metadata = importlib.reload(importlib.metadata)
-
     def norm(s: str) -> str:
         return s.lower().replace("_", "-").replace(" ", "-")
 
     hint_norm = norm(hint)
-    names = [d.metadata["Name"] for d in importlib.metadata.distributions() if d.metadata["Name"]]
-    LOG.warning(f"UNINSTALL DEBUG3: hint_norm='{hint_norm}', total names seen={len(names)}, date-related names={[n for n in names if 'date' in n.lower()]}")
+    try:
+        raw = subprocess.check_output(
+            [sys.executable, "-m", "pip", "list", "--format=json"],
+            text=True, stderr=subprocess.STDOUT,
+        )
+        names = [p["name"] for p in json.loads(raw)]
+    except (subprocess.CalledProcessError, json.JSONDecodeError):
+        return None
+
     for name in names:
         if norm(name) == hint_norm:
             return name
     candidates = [name for name in names if hint_norm in norm(name) or norm(name) in hint_norm]
-    LOG.warning(f"UNINSTALL DEBUG3: no exact match, candidates={candidates}")
     return candidates[0] if len(candidates) == 1 else None
 
 
