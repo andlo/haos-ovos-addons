@@ -256,6 +256,32 @@ def debug_entry_points(package: str):
     }
 
 
+@app.get("/debug/find-package")
+def debug_find_package(hint: str):
+    """TEMPORARY -- list all importlib.metadata distributions whose name
+    contains `hint` (case-insensitive), plus a filesystem listing of
+    site-packages entries containing it, to see whether the package is
+    truly absent or just not seen by importlib.metadata.
+    """
+    import importlib.metadata
+    matches = [
+        d.metadata["Name"] for d in importlib.metadata.distributions()
+        if d.metadata["Name"] and hint.lower() in d.metadata["Name"].lower()
+    ]
+    fs_matches = [
+        f for f in os.listdir(_site_packages_dir())
+        if hint.lower() in f.lower()
+    ]
+    persist_matches = []
+    if os.path.isdir(PERSIST_DIR):
+        persist_matches = [f for f in os.listdir(PERSIST_DIR) if hint.lower() in f.lower()]
+    return {
+        "importlib_matches": matches,
+        "site_packages_matches": fs_matches,
+        "persist_dir_matches": persist_matches,
+    }
+
+
 @app.get("/skills/running")
 def running_skills():
     """Status of every skill process this container is currently
