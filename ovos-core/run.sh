@@ -23,6 +23,16 @@ mkdir -p "${CONF_DIR}"
 jq '. + {websocket: ((.websocket // {}) + {host: "0.0.0.0", port: 8181})}' \
   "${CONF_FILE}" > "${CONF_FILE}.tmp" && mv "${CONF_FILE}.tmp" "${CONF_FILE}"
 
+# TEMPORARY DIAGNOSTIC: /ask hangs indefinitely on real hardware (no
+# response, no error, not even after 70+s) despite an identical
+# ovos-core version working correctly in the sandbox spike -- suspect a
+# network-dependent pipeline matcher (common-query, persona-pipeline)
+# blocking forever on something unreachable from this specific
+# container/network that WAS reachable from the sandbox. Blacklisting
+# both to test the hypothesis -- see DOCS.md before removing this.
+jq '. + {intents: ((.intents // {}) + {blacklisted_pipelines: ["ovos-common-query-pipeline-plugin", "ovos-persona-pipeline-plugin"]})}' \
+  "${CONF_FILE}" > "${CONF_FILE}.tmp" && mv "${CONF_FILE}.tmp" "${CONF_FILE}"
+
 if [ -n "${EXTRA_PIP}" ]; then
   bashio::log.info "Installing extra pip packages: ${EXTRA_PIP}"
   pip install --no-cache-dir --break-system-packages ${EXTRA_PIP} \
