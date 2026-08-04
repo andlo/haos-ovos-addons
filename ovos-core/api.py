@@ -179,7 +179,7 @@ def debug_ask_verbose(req: AskRequest):
     bus.on("message", on_any)
     bus.emit(Message("recognizer_loop:utterance",
                       {"utterances": [req.utterance], "lang": req.lang}))
-    _time.sleep(60)
+    _time.sleep(180)
     bus.remove("message", on_any)
     return {"message_count": len(seen), "messages": seen}
 
