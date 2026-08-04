@@ -18,11 +18,13 @@ from ovos_bus_client import MessageBusClient, Message
 
 LOG = logging.getLogger("ovos-core-api")
 
-ASK_TIMEOUT = 20  # generous -- a skill's own processing (e.g. an API call
-                   # a skill itself makes) adds to the round trip; the
-                   # sandbox spike's actual response came back in under a
-                   # second for a simple skill, this is headroom not an
-                   # expected wait.
+ASK_TIMEOUT = 150  # NOT generous headroom -- a genuine, measured requirement.
+                    # Confirmed on real hardware (a weak NUC): padatious
+                    # intent matching alone took 90s for a single simple
+                    # utterance (sandbox/known-good VM: near-instant). This
+                    # was originally mistaken for an infinite hang; it
+                    # wasn't -- see DOCS.md's "The Alpine hang" section,
+                    # now corrected to "The slow NUC" once confirmed.
 
 bus: MessageBusClient | None = None
 
