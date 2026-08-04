@@ -290,31 +290,50 @@ def _run_job(job_key: str, msg_type: str, data: dict, ok_type: str, fail_type: s
     result = emit_and_wait_either(msg_type, data, ok_type, fail_type, timeout=BUS_TIMEOUT)
     if result is None:
         jobs[job_key] = {"status": "failed", "error": "No reply from SkillsStore (timeout)"}
-        return
-    if not result["ok"]:
+    elif not result["ok"]:
         jobs[job_key] = {"status": "failed", "error": result["data"].get("error", "unknown error")}
+    else:
+        jobs[job_key] = {"status": "complete"}
+
+    # Regardless of the reported job status above: confirmed for real
+    # (skill-ovos-wolfie, this session) that SkillsStore's own bus reply
+    # is not a trustworthy signal here -- the known "error in pip
+    # subprocess" case, where pip actually succeeds but the job-complete
+    # handshake back over the bus fails, used to make this code think
+    # nothing happened and skip persisting/launching entirely, leaving a
+    # genuinely-installed skill never running. What's actually
+    # importable now that wasn't before (the filesystem itself) is the
+    # only trustworthy source of truth for "did an install really
+    # happen" -- check that unconditionally instead of gating it behind
+    # the reported status.
+    if before is None:
         return
 
-    jobs[job_key] = {"status": "complete"}
-    if before is not None:
-        try:
-            persisted = _persist_new_packages(before)
+    persisted = []
+    try:
+        persisted = _persist_new_packages(before)
+        if persisted:
             LOG.info(f"Persisted {len(persisted)} newly-installed package(s) to {PERSIST_DIR}: {persisted}")
-        except Exception as exc:
-            # A persistence failure shouldn't make a successful install
-            # look like it failed to the caller — the skill genuinely is
-            # installed and usable right now, it just won't survive a
-            # future add-on rebuild. Log loudly, don't flip the job status.
-            LOG.error(f"Failed to persist newly-installed packages: {exc}")
+    except Exception as exc:
+        # A persistence failure shouldn't make a successful install
+        # look like it failed to the caller — the skill genuinely is
+        # installed and usable right now, it just won't survive a
+        # future add-on rebuild. Log loudly, don't flip the job status.
+        LOG.error(f"Failed to persist newly-installed packages: {exc}")
 
-        # Hot-launch: start the skill process immediately, no container
-        # restart needed. entry_points() only sees packages actually on
-        # disk, so this naturally picks up whatever was just installed --
-        # confirmed the mechanism itself works end-to-end (see
-        # DEVELOPER.md's "Skill runtime" section); this wires it into the
-        # real install flow instead of a manual debug call.
-        for skill_id in skill_procs._discover():
-            skill_procs.launch(skill_id)
+    if not persisted:
+        return  # nothing was actually newly installed -- a genuine failure
+
+    # Hot-launch: start every newly-discoverable skill process
+    # immediately, no container restart needed. Also gives a skill its
+    # first chance to write its own settings.json -- OVOS creates this
+    # automatically the moment a skill loads, even with no settings at
+    # all (confirmed from Mycroft's own skill-settings documentation),
+    # so a settings UI built on that file's actual shape (see
+    # ha-ovos-integration's skill_subentry.py) has something real to
+    # read right after a fresh install, not an empty {}.
+    for skill_id in skill_procs._discover():
+        skill_procs.launch(skill_id)
 
 
 def _site_packages_dir() -> str:
