@@ -15,11 +15,24 @@ FROM ghcr.io/home-assistant/base:latest
 # dev branch — it's missing the ovos_persona_server/schemas submodule
 # entirely (ModuleNotFoundError at startup) and under-declares several
 # dependencies (ovos-workshop, uvicorn) that dev's pyproject.toml already
-# lists. Installing straight from git@dev instead of PyPI until a new
-# PyPI release catches up.
+# lists.
+#
+# Pinned to the exact commit that merged PR #67, NOT @dev: floating on
+# the branch proved genuinely unstable within a single session — the
+# AgentMessage fix (PR #67) was confirmed working for hours, then broke
+# again on a later rebuild with the identical symptom. Root cause traced
+# to ovos-persona-server's own transitive ovos-persona dependency
+# (declared as >=0.9.0a6, an unpinned alpha range) continuing to publish
+# new alphas that kept adding new default-loaded solver plugins lacking a
+# .priority attribute, crashing QuestionSolversService.modules's sort —
+# unrelated to PR #67 itself, just exposed by chasing a moving target.
+# Our own patch_persona.py is gone too: both the pinned commit and
+# current dev already include the official fix under upstream's own
+# naming (_messages_to_agent, not ours) — keeping our patch alongside
+# would make its own safety assertion fail the build.
 RUN apk add --no-cache python3 py3-pip jq git \
  && pip install --no-cache-dir --break-system-packages \
-      "git+https://github.com/OpenVoiceOS/ovos-persona-server.git@dev" \
+      "git+https://github.com/OpenVoiceOS/ovos-persona-server.git@5daafb675520398a888833443e4adecca7e97b58" \
       ovos-ddg-solver-plugin ovos-solver-failure-plugin
 
 COPY run.sh /
