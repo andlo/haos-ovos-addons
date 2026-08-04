@@ -15,7 +15,19 @@ CONF_FILE="${CONF_DIR}/mycroft.conf"
 mkdir -p "${CONF_DIR}"
 [ -f "${CONF_FILE}" ] || echo '{}' > "${CONF_FILE}"
 
-jq --argjson hw "$HOTWORDS" '. + {hotwords: $hw}' \
+# mycroft.conf is master (see DEVELOPER.md's "mycroft.conf-as-master"
+# section): confirmed by reading wyoming-ovos-wakeword's own source that,
+# unlike tts/stt, it reads its ENTIRE hotwords definition straight from
+# Configuration()["hotwords"] -- no --plugin-name CLI arg involved at
+# all. So this add-on already gets the reversal "for free" at the
+# consumer side; the only thing to fix here is not unconditionally
+# overwriting an existing hotwords section (e.g. from a previous
+# /autoconfigure run, or a manual edit) with this add-on's own
+# hotwords_config option on every restart. jq's `//` picks the existing
+# value if the key is already present (even if it's a non-empty object);
+# only fills in this add-on's own option when the key is genuinely
+# absent (first boot, or running standalone without ovos-core).
+jq --argjson hw "$HOTWORDS" '. + {hotwords: (.hotwords // $hw)}' \
   "${CONF_FILE}" > "${CONF_FILE}.tmp" && mv "${CONF_FILE}.tmp" "${CONF_FILE}"
 
 (
