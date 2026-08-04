@@ -101,6 +101,37 @@ def health():
     return {"bus_connected": bool(bus and bus.connected_event.is_set())}
 
 
+@app.get("/debug/shared-bus-test")
+def debug_shared_bus_test():
+    """TEMPORARY: test whether this container can actually reach
+    ovos-core's shared messagebus at its real hostname -- the first real
+    cross-container test of the "bind to own hostname instead of
+    0.0.0.0" hypothesis (see ovos-core/DOCS.md). Opens a SEPARATE
+    MessageBusClient with explicit host/port, independent of this
+    container's own private bus connection above. Remove once resolved.
+    """
+    import time as _time
+    test_bus = MessageBusClient(host="b8e040e3-ovos-core", port=8181)
+    test_bus.run_in_thread()
+    connected = test_bus.connected_event.wait(timeout=10)
+    result = {"connected": connected}
+    if connected:
+        # round-trip a real message to prove it's not just a TCP handshake
+        got_reply = {}
+        done = threading.Event()
+
+        def on_pong(message):
+            got_reply["data"] = message.data
+            done.set()
+
+        test_bus.once("mycroft.debug.pong", on_pong)
+        test_bus.emit(Message("mycroft.debug.ping", {}))
+        done.wait(timeout=3)
+        result["ping_pong"] = got_reply
+    test_bus.close()
+    return result
+
+
 @app.get("/catalog")
 def get_catalog():
     """Proxy the official, curated skill catalog — 36 skills as of the
