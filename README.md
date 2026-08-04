@@ -18,6 +18,7 @@ existing, already-maintained OVOS component — not new, unproven code.
 | `ovos-wyoming-stt` | STT slot in the Assist pipeline | wyoming-ovos-stt |
 | `ovos-wyoming-wakeword` | Wakeword slot in the Assist pipeline | wyoming-ovos-wakeword |
 | `ovos-persona` | Conversation agent (Ollama-compatible) | [ovos-persona-server](https://github.com/OpenVoiceOS/ovos-persona-server) |
+| `ovos-skills` | Install/remove/list OVOS skills via a small API | `ovos-core`'s own [SkillsStore](https://github.com/OpenVoiceOS/ovos-core/blob/dev/ovos_core/skill_installer.py), called by [ha-ovos-integration](https://github.com/andlo/ha-ovos-integration)'s config subentries |
 
 `ovos-skill-config` (wrapping [ovos-skill-config-tool](https://github.com/OscillateLabsLLC/ovos-skill-config-tool))
 was planned but never built — superseded by config subentries in
@@ -31,15 +32,14 @@ they just need this packaging to show up in HA's own world.
 
 ## Status
 
-All four add-ons build, run, and are discovered by HA on real hardware — see each add-on's
-own `DOCS.md` for exactly what's verified and what isn't (e.g. persona's default answers are
-weak without a real LLM solver; TTS/STT audio quality hasn't been human-verified beyond
-plumbing).
+All five add-ons build and are discovered by HA on real hardware — see each add-on's own
+`DOCS.md` for exactly what's verified and what isn't (e.g. persona's default answers are weak
+without a real LLM solver; `ovos-skills`' install/uninstall happy path is still being
+re-verified after a hardware-discovered fix, see its `DOCS.md`).
 
 ## Related repos
 
-- [ha-ovos-integration](https://github.com/andlo/ha-ovos-integration) — HA integration for shared config & per-skill management
-- [haos-ovos-skills](https://github.com/andlo/haos-ovos-skills) — skill install/management API, called by ha-ovos-integration
+- [ha-ovos-integration](https://github.com/andlo/ha-ovos-integration) — HA integration for shared config & per-skill management, calls `ovos-skills`' API
 
 ## About
 

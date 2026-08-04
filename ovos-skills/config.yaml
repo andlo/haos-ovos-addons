@@ -1,0 +1,23 @@
+name: "OVOS Skills"
+version: "0.0.1"
+slug: "ovos_skills"
+description: "Install, remove, and manage OVOS skills via a small HTTP API"
+url: "https://github.com/andlo/haos-ovos-addons/tree/master/ovos-skills"
+arch:
+  - aarch64
+  - amd64
+init: false
+startup: services
+boot: auto
+map:
+  - share:rw
+ports:
+  8500/tcp: 8500
+ports_description:
+  8500/tcp: "HTTP API port"
+options:
+  allow_pip: true
+  log_level: "info"
+schema:
+  allow_pip: "bool"
+  log_level: "list(debug|info|warning|error)"
