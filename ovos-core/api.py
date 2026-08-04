@@ -95,6 +95,20 @@ def debug_mycroft_conf():
     return {"exists": True, "path": path, "content": content}
 
 
+@app.get("/debug/versions")
+def debug_versions():
+    """TEMPORARY: send_complete_intent_failure references OVOS-PIPELINE-1
+    spec messages (ovos.intent.unmatched, ovos.utterance.handled) never
+    seen in the sandbox spike -- suspect a NEWER ovos-core got installed
+    on this real build than the sandbox's 2.6.0a1, since constraints-alpha.txt
+    is a live file fetched at build time, hours after the sandbox test.
+    """
+    import importlib.metadata
+    names = ["ovos-core", "ovos-workshop", "ovos-bus-client", "ovos-config",
+              "ovos-plugin-manager"]
+    return {n: importlib.metadata.version(n) for n in names}
+
+
 @app.get("/debug/processes")
 def debug_processes():
     """TEMPORARY: /debug/ask-verbose showed our own bus client sees
