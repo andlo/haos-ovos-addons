@@ -272,6 +272,24 @@ def _install_skill_into_venv(source: str) -> dict | None:
         shutil.rmtree(final_dir)  # reinstall/upgrade case
     shutil.move(tmp_dir, final_dir)
 
+    # A venv's own internal scripts (e.g. ovos-skill-launcher) have
+    # hardcoded, absolute shebang lines pointing at the venv's path AT
+    # CREATION TIME -- confirmed for real: moving the directory alone
+    # left them pointing at the now-gone temp path, so launching failed
+    # with FileNotFoundError even though the file itself clearly
+    # existed at its new location. Re-running virtualenv against the
+    # venv's new, final path repairs these in place (idempotent on an
+    # existing venv -- rewrites shebangs/activate scripts to match
+    # wherever it's actually run against, doesn't recreate from scratch).
+    try:
+        subprocess.run(
+            ["virtualenv", final_dir], capture_output=True, text=True, timeout=60, check=True,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        LOG.error(f"Failed to repair venv paths for {skill_id} after move: {exc}")
+        shutil.rmtree(final_dir, ignore_errors=True)
+        return None
+
     return {"skill_id": skill_id, "package_name": chosen["package_name"]}
 
 
