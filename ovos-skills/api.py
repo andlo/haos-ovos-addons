@@ -15,6 +15,7 @@ import os
 import shutil
 import site
 import subprocess
+import sys
 import threading
 from contextlib import asynccontextmanager
 from typing import Any
@@ -121,7 +122,7 @@ def list_installed_skills():
     """
     try:
         raw = subprocess.check_output(
-            ["pip", "list", "--format=json"],
+            [sys.executable, "-m", "pip", "list", "--format=json"],
             text=True,
             stderr=subprocess.STDOUT,
         )
@@ -221,16 +222,33 @@ def install_status(key: str):
     return job
 
 
+def _run_uninstall_job(job_key: str, package_name: str):
+    ok, error = _direct_pip_uninstall(package_name)
+    if ok:
+        jobs[job_key] = {"status": "complete"}
+    else:
+        jobs[job_key] = {"status": "failed", "error": error}
+
+
 @app.delete("/skills/{skill_id}")
-def uninstall_skill(skill_id: str):
-    if bus is None or not bus.connected_event.is_set():
-        raise HTTPException(status_code=503, detail="Not connected to internal bus")
+def uninstall_skill(skill_id: str, package_name: str | None = None):
+    """Bypasses SkillsStore's own (currently stubbed) uninstall — see
+    _direct_pip_uninstall's docstring. package_name resolves the real
+    installed name via the same fuzzy matcher settingsmeta uses (the
+    catalog's package_name and the real installed name don't always
+    match); falls back to a dot-to-dash guess from skill_id if omitted,
+    same heuristic SkillsStore itself uses.
+    """
+    real_name = None
+    if package_name:
+        real_name = _find_installed_package(package_name)
+    if real_name is None:
+        real_name = skill_id.replace(".", "-") if "." in skill_id else skill_id
 
     jobs[skill_id] = {"status": "pending"}
     threading.Thread(
-        target=_run_job,
-        args=(skill_id, "ovos.skills.uninstall", {"skill": skill_id},
-              "ovos.skills.uninstall.complete", "ovos.skills.uninstall.failed"),
+        target=_run_uninstall_job,
+        args=(skill_id, real_name),
         daemon=True,
     ).start()
     return {"status": "pending", "poll": f"/skills/install/status?key={skill_id}"}
@@ -253,6 +271,81 @@ def _find_installed_package(hint: str) -> str | None:
             return name
     candidates = [name for name in names if hint_norm in norm(name) or norm(name) in hint_norm]
     return candidates[0] if len(candidates) == 1 else None
+
+
+# Mirrors SkillsStore's own hardcoded fallback protected-package list
+# exactly. Deliberately NOT read from our own constraints file — that
+# file is intentionally empty (see the stale-constraints-file fix
+# above), and SkillsStore uses that same file for both version pins AND
+# the protected-package list, so reusing it here would silently disable
+# protection entirely. Kept independent on purpose.
+PROTECTED_PACKAGES = {
+    "ovos-core", "ovos-utils", "ovos-plugin-manager",
+    "ovos-config", "ovos-bus-client", "ovos-workshop",
+}
+
+
+def _remove_persisted_package(package_name: str) -> None:
+    """Remove a package's files from PERSIST_DIR too — must run BEFORE
+    the actual pip uninstall, since importlib.metadata.files() only
+    works while the package is still installed. Otherwise an uninstalled
+    skill would silently reappear on the next container restart via
+    run.sh's restore step.
+    """
+    try:
+        files = importlib.metadata.files(package_name) or []
+    except importlib.metadata.PackageNotFoundError:
+        return
+    sp_dir = _site_packages_dir()
+    for f in files:
+        src = str(f.locate())
+        try:
+            rel = os.path.relpath(src, sp_dir)
+        except ValueError:
+            continue
+        if rel.startswith(".."):
+            continue
+        target = os.path.join(PERSIST_DIR, rel)
+        if os.path.isfile(target):
+            os.remove(target)
+
+
+def _direct_pip_uninstall(package_name: str) -> tuple[bool, str]:
+    """Bypasses SkillsStore/the messagebus entirely. Its own uninstall is
+    a stub on the current PyPI ovos-core — already fixed in ovos-core's
+    dev branch, but not releasable to PyPI without also resolving a
+    separate ovos-messagebus version conflict (see DOCS.md) — a
+    release-coordination problem across two repos, not something a PR
+    here could fix, unlike the missing --upgrade support (#843), which
+    was a genuine local code gap.
+
+    Deliberately a stand-in, not the destination: once a PyPI release
+    resolves that conflict, prefer switching back to SkillsStore's own
+    uninstall (same protected-package concept, better maintained) over
+    keeping this running in parallel indefinitely.
+    """
+    def norm(s: str) -> str:
+        return s.lower().replace("_", "-").replace(".", "-")
+
+    if norm(package_name) in PROTECTED_PACKAGES:
+        return False, f"refusing to uninstall protected package: {package_name}"
+
+    _remove_persisted_package(package_name)
+
+    # sys.executable, not a bare "pip" — matches SkillsStore's own
+    # approach. A bare "pip" can resolve to a different interpreter's
+    # pip than the one actually running this process; confirmed the hard
+    # way, reporting success while silently uninstalling from the wrong
+    # place, before switching to this.
+    cmd = [sys.executable, "-m", "pip", "uninstall", "-y", "--break-system-packages", package_name]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        return False, "pip uninstall timed out"
+
+    if result.returncode != 0:
+        return False, (result.stderr or result.stdout or "pip uninstall failed").strip()
+    return True, ""
 
 
 def _settings_path(skill_id: str) -> str:

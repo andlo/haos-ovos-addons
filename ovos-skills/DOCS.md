@@ -23,7 +23,7 @@ in HA.
 | `GET /skills` | Lists installed skills — **heuristic**: pip packages named `ovos-skill-*`/`skill-*`, not a confirmed mechanism |
 | `POST /skills/install` | Body `{"url": "https://github.com/..."}`. Async — returns `{"status": "pending", "poll": "..."}` immediately, doesn't block on pip |
 | `GET /skills/install/status?key=<url or skill_id>` | Poll for the real result |
-| `DELETE /skills/{skill_id}` | Same async pattern as install |
+| `DELETE /skills/{skill_id}?package_name=<hint>` | Same async pattern as install. Bypasses `SkillsStore` (see below) |
 
 ## Configuration
 
@@ -71,12 +71,8 @@ in HA.
   before submitting: [OpenVoiceOS/ovos-core#843](https://github.com/OpenVoiceOS/ovos-core/pull/843).
   Not usable from our side yet — same PyPI-lag problem as uninstall below, since it needs a
   new `ovos-core` release to reach us.
-- **`DELETE /skills/{id}` doesn't work yet** — upstream `SkillsStore.handle_uninstall_skill()`
-  is a stub on the current PyPI `ovos-core`. Different situation from the upgrade gap above:
-  this one is **already fixed in `dev`** (real implementation, confirmed by reading the
-  source directly), just not releasable to PyPI without also resolving `ovos-core@dev`'s
-  version conflict with `ovos-messagebus` (see "What was fixed on real hardware" above) — a
-  release-coordination problem across two repos, not something a single PR here can fix.
+- **`DELETE /skills/{id}` bypasses `SkillsStore` entirely now** — see the section below for
+  why and how. Fixed, but deliberately not the long-term destination.
 - `GET /skills` (list installed) is a naming-convention heuristic — confirmed working against
   a real installed skill (`ovos-skill-date-time`), but still just a heuristic, not a
   guaranteed-correct mechanism for skills that don't follow the naming convention.
@@ -114,3 +110,37 @@ never showed up in the container log, even though the persist step demonstrably 
 restore step on the next start found real files to copy). Likely a `logging` configuration
 gap — this logger was never explicitly wired to a handler/level, so it may be silently
 swallowed rather than actually failing. Worth a quick look, not urgent.
+
+## `DELETE /skills/{id}` now works — via a local bridge, not SkillsStore
+
+Was documented as broken (upstream stub); fixed, but deliberately as a temporary bridge, not
+the destination. `SkillsStore.handle_uninstall_skill()` is fixed in `ovos-core`'s `dev`
+branch already — the actual blocker is that `dev` needs newer `ovos_bus_client`/`ovos-config`
+than `ovos-messagebus` currently provides, a release-coordination problem across two repos
+that no PR against this add-on could resolve. So `DELETE` now bypasses `SkillsStore`/the
+messagebus entirely and runs `pip uninstall` directly — same approach as the `/skills` list
+and the persist-on-install logic already use.
+
+Two things worth being explicit about, both confirmed by testing before trusting them:
+
+- **Protected packages.** Mirrors `SkillsStore`'s own hardcoded fallback list
+  (`ovos-core`, `ovos-utils`, `ovos-plugin-manager`, `ovos-config`, `ovos-bus-client`,
+  `ovos-workshop`) — checked independently of our own `constraints` file, not by reusing it.
+  That file is deliberately empty (see the stale-constraints fix above), and `SkillsStore`
+  reads protected packages from that *same* file, so reusing it here would have silently
+  disabled protection entirely. Confirmed: attempting to uninstall `ovos-core` is refused.
+- **`sys.executable -m pip`, not a bare `pip`.** Found the hard way, not by reasoning about
+  it: a bare `["pip", "uninstall", ...]` reported success while silently targeting a
+  *different* Python's pip than the one actually running the add-on — `pip show` afterward
+  still showed the package installed. Switched to `[sys.executable, "-m", "pip", ...]`
+  (matching `SkillsStore`'s own approach) and reproduced the exact same scenario with a
+  genuinely confirmed removal (`pip show` then correctly reports "not found"). Also fixed the
+  same latent issue in the `/skills` list endpoint, which had the same bare-`pip` pattern.
+
+Persisted package files (see above) are removed too, before the actual pip uninstall runs —
+otherwise an uninstalled skill would silently reappear on the next container restart via
+`run.sh`'s own restore step.
+
+**Revisit once upstream catches up**: prefer switching back to calling `SkillsStore`'s real
+uninstall over maintaining this bridge indefinitely, once a PyPI release resolves the
+`ovos-messagebus` version conflict.
