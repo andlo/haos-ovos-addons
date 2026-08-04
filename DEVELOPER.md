@@ -312,21 +312,47 @@ overridable, both at first setup and any time after. Only `timezone` is missing 
 treatment (set once at initial config flow, no entity to change it later) -- a small, easy gap
 to close, not a new mechanism to build.
 
-The genuinely unbuilt piece: an `autoconfigure`-style *plugin picker*. Each Wyoming add-on's
-`plugin`/`plugin_config` options are free-text today -- technically already "possible to use
-any TTS/STT plugin, local or online", but only for someone who already knows the exact
-package name and its config JSON. Building the guided version means: a UI step (offline/online,
-male/female, using the language already set) that resolves to a real plugin name + config,
-written into the *right add-on's own Supervisor options* (not the shared `mycroft.conf` --
-plugin choice is a per-add-on `options.plugin` value, a different mechanism from everything
-else this integration writes so far). Two ways to get the actual plugin/language selection
-data: shell out to `ovos-config`'s own CLI (a new dependency inside HA Core's Python
-environment, unconfirmed whether that's clean) or read `lang_configs`' underlying data
-directly and replicate the selection logic (more control, more to maintain). Writing the
-result also needs a new capability this integration doesn't have yet: calling Supervisor's
-own `/addons/{slug}/options` API from HA Core's side (requires `hassio_api: true` in the
-integration's own manifest) -- everything built so far only reads/writes the shared
-`mycroft.conf`, never another add-on's own options.
+The genuinely unbuilt piece: an `autoconfigure`-style *plugin picker* -- and working through
+its design surfaced a real architecture reversal, not just a new feature.
+
+**Confirmed by reading the actual source**: `ovos_config.__main__.autoconfigure()` (a plain,
+importable Python function under a `click` decorator, not just a CLI script) reads from a
+`recommends/` directory bundled with the `ovos-config` package itself -- not an external
+`lang_configs` fetch, as first assumed -- and writes its result directly to `USER_CONFIG`,
+which (via this project's `XDG_CONFIG_HOME=/share` convention) *is* the shared
+`/share/mycroft/mycroft.conf`. `ovos-core`'s own container already has `ovos-config` installed
+as a dependency -- calling this directly from a small new `ovos-core` endpoint gets its real,
+maintained selection logic "for free," no new dependency inside HA Core's own Python
+environment, no re-implementing `lang_configs`' logic ourselves.
+
+**The reversal**: today, each Wyoming add-on's `run.sh` treats its own `options.plugin` as the
+source of truth and *overwrites* the shared `mycroft.conf`'s `tts`/`stt` section with it on
+every start -- meaning a manual edit to the shared file (the natural thing for anyone who
+already knows OVOS to try) would silently get clobbered on the add-on's next restart. Raised
+directly in discussion and correct: **`mycroft.conf` should be the master**, not each add-on's
+own options. Flip the direction -- `run.sh` reads the existing `tts`/`stt` section if present
+and uses it, falling back to `options.plugin`/`plugin_config` only if the shared file doesn't
+have one yet (first boot, or someone running a Wyoming add-on standalone without `ovos-core`/
+`ovos-skills` at all). This makes the whole feature simpler, not more complex: `ovos-core`'s
+new endpoint can call `autoconfigure()` against the real shared file directly -- no isolated
+temp-file trick needed, no new Supervisor `/addons/{slug}/options` write capability required
+at all. A manual `mycroft.conf` edit, `autoconfigure`, and each add-on's own options field all
+become different ways of writing to the same one source of truth, not three competing
+mechanisms needing reconciliation.
+
+**Explicit boundary, decided deliberately**: someone running only the Wyoming add-ons, without
+`ovos-core`, doesn't get the guided `autoconfigure` picker -- that logic lives with
+`ovos-config`, which lives with `ovos-core`, on purpose, rather than duplicating the dependency
+into a Wyoming add-on just to cover this case (maintaining the same logic in two places for a
+narrow scenario isn't a good trade). Not a regression: they keep everything that already works
+today (free-text `plugin`/`plugin_config`, or editing `mycroft.conf` directly, for anyone who
+knows OVOS) -- they just don't get the extra guided convenience. `ha-ovos-integration`'s config
+flow should check whether `ovos-core` is actually present/responding before showing the
+autoconfigure step, and explain the requirement plainly if it's not, rather than let someone
+discover the boundary via a failed click. Known related limitation, not solved here: this
+whole design assumes `ovos-core` is reachable at its hardcoded Supervisor hostname within the
+same HAOS instance -- someone running `ovos-core` on a separate machine (a real scenario, not
+hypothetical) is outside what this covers for now.
 
 ## Original 3-repo plan (superseded, kept for history)
 
