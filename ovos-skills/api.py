@@ -8,13 +8,16 @@ which ovos-core's own README says is unsupported since ovos-core 0.0.8.
 """
 from __future__ import annotations
 
+import importlib.metadata
 import json
+import os
 import subprocess
 import threading
 from contextlib import asynccontextmanager
+from typing import Any
 
 import requests
-from fastapi import FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException
 from pydantic import BaseModel
 from ovos_bus_client import MessageBusClient, Message
 
@@ -166,6 +169,90 @@ def uninstall_skill(skill_id: str):
         daemon=True,
     ).start()
     return {"status": "pending", "poll": f"/skills/install/status?key={skill_id}"}
+
+
+def _find_installed_package(hint: str) -> str | None:
+    """The catalog's package_name doesn't always match what pip actually
+    installed it as — confirmed for real (skill-ovos-fallback-chatgpt's
+    catalog entry says ovos-skill-ovos-fallback-chatgpt, but it installs
+    as skill-ovos-fallback-chatgpt). Normalized exact match first, then a
+    unique-substring fallback, rather than trusting the hint literally.
+    """
+    def norm(s: str) -> str:
+        return s.lower().replace("_", "-").replace(" ", "-")
+
+    hint_norm = norm(hint)
+    names = [d.metadata["Name"] for d in importlib.metadata.distributions() if d.metadata["Name"]]
+    for name in names:
+        if norm(name) == hint_norm:
+            return name
+    candidates = [name for name in names if hint_norm in norm(name) or norm(name) in hint_norm]
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def _settings_path(skill_id: str) -> str:
+    # Matches OVOS's own runtime convention, confirmed against real skill
+    # READMEs: ${XDG_CONFIG_HOME}/mycroft/skills/<skill_id>/settings.json
+    # — keyed by skill_id (the catalog's dotted id), not the pip package
+    # name, unlike settingsmeta lookup below.
+    base = os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config"))
+    return os.path.join(base, "mycroft", "skills", skill_id, "settings.json")
+
+
+@app.get("/skills/{skill_id}/settingsmeta")
+def get_settingsmeta(skill_id: str, package_name: str):
+    """Not every skill ships a settingsmeta.json — confirmed for real by
+    installing two different skills: one had it, one didn't. Callers must
+    handle has_settingsmeta: false and fall back to raw settings editing.
+    """
+    real_name = _find_installed_package(package_name)
+    if real_name is None:
+        raise HTTPException(status_code=404, detail=f"No installed package matching '{package_name}'")
+
+    try:
+        files = importlib.metadata.files(real_name) or []
+    except importlib.metadata.PackageNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Package metadata not found for '{real_name}'")
+
+    meta_file = next((f for f in files if f.name == "settingsmeta.json"), None)
+    if meta_file is None:
+        return {"has_settingsmeta": False, "fields": [], "package_name": real_name}
+
+    try:
+        content = json.loads(meta_file.read_text())
+    except (json.JSONDecodeError, OSError) as exc:
+        raise HTTPException(status_code=500, detail=f"Could not parse settingsmeta.json: {exc}")
+
+    fields = [
+        field
+        for section in content.get("skillMetadata", {}).get("sections", [])
+        for field in section.get("fields", [])
+    ]
+    return {"has_settingsmeta": True, "fields": fields, "package_name": real_name}
+
+
+@app.get("/skills/{skill_id}/settings")
+def get_settings(skill_id: str):
+    path = _settings_path(skill_id)
+    if not os.path.isfile(path):
+        return {}
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError) as exc:
+        raise HTTPException(status_code=500, detail=f"Could not read settings.json: {exc}")
+
+
+@app.put("/skills/{skill_id}/settings")
+def put_settings(skill_id: str, settings: dict[str, Any] = Body(...)):
+    path = _settings_path(skill_id)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    try:
+        with open(path, "w") as f:
+            json.dump(settings, f, indent=2)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Could not write settings.json: {exc}")
+    return {"status": "ok"}
 
 
 if __name__ == "__main__":
