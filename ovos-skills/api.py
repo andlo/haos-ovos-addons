@@ -8,7 +8,6 @@ which ovos-core's own README says is unsupported since ovos-core 0.0.8.
 """
 from __future__ import annotations
 
-import importlib.metadata
 import json
 import logging
 import os
@@ -36,6 +35,19 @@ LOG = logging.getLogger("ovos-skills-api")
 # /share volume, which does persist); run.sh copies them back into
 # site-packages on every container start, before anything else runs.
 PERSIST_DIR = "/share/ovos-skills/persisted-packages"
+
+# Run in a fresh `python -c` subprocess by SkillProcessManager._discover()
+# -- see that method's docstring for why this can't run inline in this
+# long-running process.
+_DISCOVER_SCRIPT = """
+import importlib.metadata, json
+result = {}
+for group in ("opm.skill", "ovos.plugin.skill"):
+    for ep in importlib.metadata.entry_points(group=group):
+        if ep.name not in result:
+            result[ep.name] = ep.dist.name if ep.dist else ep.name
+print(json.dumps(result))
+"""
 
 CATALOG_URL = "https://openvoiceos.github.io/OVOS-skills-store/skills.json"
 BUS_TIMEOUT = 300  # generous — this now runs in a background thread, not
@@ -86,13 +98,29 @@ class SkillProcessManager:
     def _discover() -> dict[str, str]:
         """Returns {skill_id: package_name} for every currently-installed
         skill in this container.
+
+        Runs in a FRESH subprocess, matching the /skills endpoint's own
+        `pip list` pattern -- NOT importlib.metadata.entry_points() in
+        this long-running process. Confirmed for real, this session
+        (skill-ovos-wolfie): a package installed by another process (the
+        messagebus-driven install flow, running in a separate
+        ovos-skill-installer process) after this process started is
+        invisible here even after importlib.reload(importlib.metadata) --
+        genuinely on disk, seen correctly by `pip list`, but absent from
+        this process's own importlib.metadata view. A fresh interpreter
+        reads site-packages from scratch every time and sees it
+        correctly, same reasoning as _find_installed_package's own use
+        of `pip list` elsewhere in this file.
         """
-        result: dict[str, str] = {}
-        for group in ("opm.skill", "ovos.plugin.skill"):
-            for ep in importlib.metadata.entry_points(group=group):
-                if ep.name not in result:
-                    result[ep.name] = ep.dist.name if ep.dist else ep.name
-        return result
+        try:
+            raw = subprocess.check_output(
+                [sys.executable, "-c", _DISCOVER_SCRIPT],
+                text=True, stderr=subprocess.STDOUT,
+            )
+            return json.loads(raw)
+        except (subprocess.CalledProcessError, json.JSONDecodeError) as exc:
+            LOG.error(f"Skill discovery subprocess failed: {exc}")
+            return {}
 
     def package_name_for(self, skill_id: str) -> str | None:
         return self._discover().get(skill_id)
@@ -237,33 +265,6 @@ def health():
     return {"bus_connected": bool(bus and bus.connected_event.is_set())}
 
 
-@app.get("/debug/find-package")
-def debug_find_package(hint: str):
-    """TEMPORARY -- diagnosing why a genuinely-installed skill isn't
-    discovered via entry_points, see DEVELOPER.md.
-    """
-    import importlib.metadata
-    matches = [
-        d.metadata["Name"] for d in importlib.metadata.distributions()
-        if d.metadata["Name"] and hint.lower() in d.metadata["Name"].lower()
-    ]
-    fs_matches = [f for f in os.listdir(_site_packages_dir()) if hint.lower() in f.lower()]
-    persist_matches = []
-    if os.path.isdir(PERSIST_DIR):
-        persist_matches = [f for f in os.listdir(PERSIST_DIR) if hint.lower() in f.lower()]
-    ep_groups = {}
-    for d in importlib.metadata.distributions():
-        name = d.metadata["Name"] or ""
-        if hint.lower() in name.lower():
-            ep_groups[name] = [{"group": ep.group, "name": ep.name} for ep in d.entry_points]
-    return {
-        "importlib_matches": matches,
-        "site_packages_matches": fs_matches,
-        "persist_dir_matches": persist_matches,
-        "entry_points_by_match": ep_groups,
-    }
-
-
 @app.get("/skills/running")
 def running_skills():
     """Status of every skill process this container is currently
@@ -369,7 +370,50 @@ def _site_packages_dir() -> str:
 
 
 def _installed_names() -> set[str]:
-    return {d.metadata["Name"] for d in importlib.metadata.distributions() if d.metadata["Name"]}
+    """Via a fresh `pip list` subprocess, not importlib.metadata in this
+    process -- see SkillProcessManager._discover's docstring for why.
+    """
+    try:
+        raw = subprocess.check_output(
+            [sys.executable, "-m", "pip", "list", "--format=json"],
+            text=True, stderr=subprocess.STDOUT,
+        )
+        return {p["name"] for p in json.loads(raw)}
+    except (subprocess.CalledProcessError, json.JSONDecodeError) as exc:
+        LOG.error(f"pip list subprocess failed: {exc}")
+        return set()
+
+
+def _pip_show_files(package_name: str) -> tuple[str, list[str]] | None:
+    """(site-packages location, [file paths relative to it]) for an
+    installed package, via a fresh `pip show -f` subprocess -- NOT
+    importlib.metadata.files(), which is unreliable in this long-running
+    process for anything installed by another process after this one
+    started (see SkillProcessManager._discover's docstring for the full
+    reasoning; this hit the same wall for the same reason).
+    """
+    try:
+        raw = subprocess.check_output(
+            [sys.executable, "-m", "pip", "show", "-f", package_name],
+            text=True, stderr=subprocess.STDOUT,
+        )
+    except subprocess.CalledProcessError:
+        return None
+
+    location = None
+    files: list[str] = []
+    in_files = False
+    for line in raw.splitlines():
+        if line.startswith("Location:"):
+            location = line.split(":", 1)[1].strip()
+        elif line.startswith("Files:"):
+            in_files = True
+        elif in_files and line.startswith("  "):
+            files.append(line.strip())
+        elif in_files:
+            in_files = False
+
+    return (location, files) if location is not None else None
 
 
 def _persist_new_packages(before: set[str]) -> list[str]:
@@ -378,22 +422,17 @@ def _persist_new_packages(before: set[str]) -> list[str]:
     PERSIST_DIR, preserving their path relative to site-packages, so
     run.sh can copy them straight back on the next container start.
     """
-    importlib.metadata = importlib.reload(importlib.metadata)  # pick up new dist-info
     new_names = _installed_names() - before
-    sp_dir = _site_packages_dir()
     persisted = []
     for name in new_names:
-        try:
-            files = importlib.metadata.files(name) or []
-        except importlib.metadata.PackageNotFoundError:
+        result = _pip_show_files(name)
+        if result is None:
             continue
-        for f in files:
-            src = str(f.locate())
+        location, files = result
+        for rel in files:
+            src = os.path.join(location, rel)
             if not os.path.isfile(src):
                 continue
-            rel = os.path.relpath(src, sp_dir)
-            if rel.startswith(".."):
-                continue  # not actually under site-packages, e.g. a script in bin/
             dst = os.path.join(PERSIST_DIR, rel)
             os.makedirs(os.path.dirname(dst), exist_ok=True)
             shutil.copy2(src, dst)
@@ -644,17 +683,21 @@ def get_settingsmeta(skill_id: str, package_name: str):
     if real_name is None:
         raise HTTPException(status_code=404, detail=f"No installed package matching '{package_name}'")
 
-    try:
-        files = importlib.metadata.files(real_name) or []
-    except importlib.metadata.PackageNotFoundError:
+    # _pip_show_files, not importlib.metadata.files() -- same reasoning
+    # as SkillProcessManager._discover's docstring; a freshly-installed
+    # package is invisible to this process's own importlib.metadata view.
+    result = _pip_show_files(real_name)
+    if result is None:
         raise HTTPException(status_code=404, detail=f"Package metadata not found for '{real_name}'")
+    location, files = result
 
-    meta_file = next((f for f in files if f.name == "settingsmeta.json"), None)
-    if meta_file is None:
+    meta_rel = next((f for f in files if os.path.basename(f) == "settingsmeta.json"), None)
+    if meta_rel is None:
         return {"has_settingsmeta": False, "fields": [], "package_name": real_name}
 
     try:
-        content = json.loads(meta_file.read_text())
+        with open(os.path.join(location, meta_rel), encoding="utf-8") as f:
+            content = json.load(f)
     except (json.JSONDecodeError, OSError) as exc:
         raise HTTPException(status_code=500, detail=f"Could not parse settingsmeta.json: {exc}")
 
