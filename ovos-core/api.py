@@ -7,7 +7,9 @@ specifically -- see the module-level lock below).
 """
 from __future__ import annotations
 
+import json
 import logging
+import subprocess
 import threading
 from contextlib import asynccontextmanager
 
@@ -56,6 +58,83 @@ class AskRequest(BaseModel):
 @app.get("/health")
 def health():
     return {"bus_connected": bool(bus and bus.connected_event.is_set())}
+
+
+SHARED_CONFIG_PATH = "/share/mycroft/mycroft.conf"
+
+
+class AutoconfigureRequest(BaseModel):
+    lang: str
+    online: bool = False   # mutually exclusive with offline -- if
+    offline: bool = False  # neither is set, ovos-config defaults to
+                            # "hybrid" (offline TTS + online STT)
+    male: bool = False     # mutually exclusive with female -- if
+    female: bool = False   # neither is set, TTS voice config is skipped
+                            # entirely (confirmed by reading autoconfigure's
+                            # own source)
+
+
+@app.post("/autoconfigure")
+def autoconfigure(req: AutoconfigureRequest):
+    """Runs OVOS's own `ovos-config autoconfigure` CLI against the real,
+    shared mycroft.conf -- not an isolated temp file. This container
+    already has ovos-config installed (a real dependency, not added just
+    for this), so this gets its actual, maintained plugin-selection logic
+    "for free" rather than re-implementing it. See DEVELOPER.md's
+    "mycroft.conf-as-master" section for why writing to the real shared
+    file directly, instead of an isolated copy, is the correct design
+    here (Wyoming add-ons are meant to read this shared value as their
+    own source of truth once that reversal is built).
+
+    Called via subprocess, not by importing the click-decorated Python
+    function directly -- runs exactly as the CLI is designed to, with
+    click's own validation (e.g. rejecting --male + --female together)
+    intact, rather than us needing to understand click's internals to
+    call it safely.
+
+    IMPORTANT, confirmed by testing directly: autoconfigure writes far
+    more than just tts/stt -- also system_unit, lang, and several
+    date/time-format keys, all derived from the chosen language. This
+    endpoint reports back everything that changed, not just tts/stt, so
+    a caller (ha-ovos-integration) can decide how to handle values it
+    already manages from HA's own settings (see DEVELOPER.md -- explicit
+    reconciliation with those fields is NOT built yet, deliberately left
+    for that layer to decide, not silently overwritten here without the
+    caller knowing).
+    """
+    cmd = ["ovos-config", "autoconfigure", "--lang", req.lang]
+    if req.online:
+        cmd.append("--online")
+    if req.offline:
+        cmd.append("--offline")
+    if req.male:
+        cmd.append("--male")
+    if req.female:
+        cmd.append("--female")
+
+    try:
+        before = _read_shared_config()
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="ovos-config autoconfigure timed out")
+
+    if result.returncode != 0:
+        raise HTTPException(
+            status_code=500,
+            detail=(result.stderr or result.stdout or "autoconfigure failed").strip(),
+        )
+
+    after = _read_shared_config()
+    changed = {k: v for k, v in after.items() if before.get(k) != v}
+    return {"changed_keys": changed}
+
+
+def _read_shared_config() -> dict:
+    try:
+        with open(SHARED_CONFIG_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
 
 
 def _ask_sync(utterance: str, lang: str) -> dict | None:
