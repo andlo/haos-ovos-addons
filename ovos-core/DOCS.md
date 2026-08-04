@@ -91,10 +91,11 @@ padatious held. Confirmed for real: `POST /ask {"utterance": "what time is it"}`
 answer, under a second, no timeout needed.
 
 **Kept anyway, on their own merits**:
-- The **Debian base image** — didn't fix the hang, but no reason to revert it either; it's a
-  legitimate, documented choice (matches OVOS's own official platform) and reverting would
-  reintroduce an untested variable for no benefit now that the real fix is elsewhere. If this
-  ever feels worth revisiting, do it deliberately, not as a leftover.
+- ~~The **Debian base image**~~ — **reverted back to Alpine**: Debian never actually fixed
+  anything (the identical hang reproduced on it too), so keeping it would have made this the
+  only one of six add-ons off Alpine for no remaining reason once the real cause was
+  understood. Rebuild-and-retest on Alpine with padacioso configured is the immediate next
+  step, not yet confirmed at the time of writing this paragraph — see "Not yet done".
 - The **`intents.blacklisted_pipelines`** entry (`ovos-common-query-pipeline-plugin`,
   `ovos-persona-pipeline-plugin`) added while testing (and ruling out) a hanging-network-call
   hypothesis — harmless to leave, and both are genuinely out of scope for this add-on today
