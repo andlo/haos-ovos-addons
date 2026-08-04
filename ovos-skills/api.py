@@ -263,15 +263,20 @@ def _find_installed_package(hint: str) -> str | None:
     as skill-ovos-fallback-chatgpt). Normalized exact match first, then a
     unique-substring fallback, rather than trusting the hint literally.
 
-    Reloads importlib.metadata first — its internal finder cache can be
-    stale for packages that appeared via run.sh's restore-on-start copy
-    rather than a pip install run inside this process. Confirmed the
-    hard way: a real skill, definitely on disk and shown by `pip list`,
-    was invisible here without this, causing uninstall to fall back to a
-    guessed package name that doesn't exist — reporting success while
-    touching nothing.
+    Reloads importlib.metadata AND invalidates the path finder cache
+    first — confirmed via explicit logging on real hardware that
+    reload() alone genuinely wasn't enough: a real skill, on disk and
+    shown by `pip list`, was completely absent from
+    importlib.metadata.distributions() (85 packages seen, this one not
+    among them) even after reload(). The site-packages directory has
+    been scanned repeatedly since process start (every earlier import),
+    unlike a freshly sys.path-inserted directory — its FileFinder cache
+    needs invalidate_caches(), not just reloading the metadata module
+    itself. This caused uninstall to fall back to a guessed package name
+    that doesn't exist, reporting success while touching nothing.
     """
     global importlib
+    importlib.invalidate_caches()
     importlib.metadata = importlib.reload(importlib.metadata)
 
     def norm(s: str) -> str:
