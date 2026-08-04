@@ -100,6 +100,26 @@ def health():
     return {"bus_connected": bool(bus and bus.connected_event.is_set())}
 
 
+@app.get("/debug/persist-dir")
+def debug_persist_dir():
+    """Temporary diagnostic — a skill reappeared after an uninstall +
+    rebuild on real hardware despite _remove_persisted_package running
+    (confirmed in logs) and working correctly in an isolated sandbox
+    test. Need to see what's actually in PERSIST_DIR on the real
+    container to find the real cause instead of guessing further.
+    Remove once the actual bug is found and fixed.
+    """
+    if not os.path.isdir(PERSIST_DIR):
+        return {"exists": False}
+    entries = []
+    for root, dirs, files in os.walk(PERSIST_DIR):
+        for f in files:
+            entries.append(os.path.relpath(os.path.join(root, f), PERSIST_DIR))
+    return {"exists": True, "file_count": len(entries), "date_time_related": [
+        e for e in entries if "date" in e.lower() or "date_time" in e.lower()
+    ]}
+
+
 @app.get("/catalog")
 def get_catalog():
     """Proxy the official, curated skill catalog — 36 skills as of the
