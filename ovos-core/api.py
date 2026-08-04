@@ -78,6 +78,23 @@ def debug_skill_files():
     return {"pkg_dir": pkg_dir, "tree": tree}
 
 
+@app.get("/debug/mycroft-conf")
+def debug_mycroft_conf():
+    """TEMPORARY: resource files ARE present (confirmed via /debug/skill-files)
+    and lang is correctly 'en-us' (confirmed via HA's own text.language
+    entity) -- so something about the SHARED /share/mycroft/mycroft.conf
+    itself (written to by five other add-ons: tts/stt/wakeword/persona/
+    skills) may be affecting intent matching in a way the sandbox spike's
+    clean, empty config never exercised. Remove once resolved.
+    """
+    path = "/share/mycroft/mycroft.conf"
+    if not os.path.isfile(path):
+        return {"exists": False, "path": path}
+    with open(path) as f:
+        content = f.read()
+    return {"exists": True, "path": path, "content": content}
+
+
 def _ask_sync(utterance: str, lang: str) -> dict | None:
     """The exact emit/wait pattern confirmed in the sandbox spike: send
     recognizer_loop:utterance (same message ovos-say-to itself emits --
