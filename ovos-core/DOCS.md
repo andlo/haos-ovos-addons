@@ -1,12 +1,96 @@
 # OVOS Core
 
-🚧 **Built, not yet deployed to real hardware.** `config.yaml`, `Dockerfile`, `run.sh`,
-`api.py`, and `translations/en.yaml` all exist. The synchronous Q&A mechanism is confirmed
-working end-to-end against a real `ovos-core` instance in a sandbox spike — including the
-actual `api.py` code running as a real HTTP server, not just the underlying bus messages
-tested manually. What's genuinely unverified: the Alpine-based Docker build itself (the spike
-ran on a Debian/Ubuntu sandbox), and everything about running in Supervisor specifically. See
-"Not yet done" at the end of this file for the full, honest list.
+🚧 **Built, deployed, and one deep bug found and fixed.** `config.yaml`, `Dockerfile`,
+`run.sh`, `api.py`, and `translations/en.yaml` all exist. The synchronous Q&A mechanism was
+confirmed working end-to-end in a sandbox spike — but real Supervisor deployment on Alpine hit
+a genuine, reproducible bug: `/ask` hung indefinitely. See "The Alpine hang" below for the
+full investigation and the fix (switching this one add-on's base image to Debian). What's
+still unverified: the actual Debian-based build on real hardware (the fix was reasoned and
+implemented but not yet rebuilt/retested at the time of writing — do that first, next
+session). See "Not yet done" at the end of this file for the full, honest list.
+
+## The Alpine hang — a real, reproducible bug and its fix
+
+**Symptom**: `/ask` with `"what time is it"` (a skill genuinely installed, loaded, and ready —
+confirmed via logs) never returned anything. Not a slow response, not an error — the
+underlying `ovos_core.intent_services.service:handle_utterance` logged `"Parsing utterance:
+[...]"` and then nothing else, ever, for 70+ seconds. No match, no `complete_intent_failure`,
+no fallback, no timeout, no exception. `/health` confirmed the messagebus connection stayed
+up throughout.
+
+**Hypotheses tested and ruled out, each with concrete evidence, not guessing**:
+
+1. **Alpine build itself broken?** No — it built and started cleanly (`fann-dev` from
+   Alpine's `community` repo, `swig2.0` shim). `pip check` was clean.
+2. **Resource files (`.intent`/`.dialog`) missing from the installed skill package?** No —
+   added a temporary `/debug/skill-files` endpoint and confirmed every locale directory,
+   including `locale/en-US/intents/what.time.is.it.intent`, was genuinely present on disk.
+3. **Wrong language?** No — confirmed `lang: "en-us"` both via HA's own `text.language`
+   entity and by reading it back from the shared `mycroft.conf`.
+4. **Something odd in the shared `mycroft.conf`** (written to by five other add-ons)? Read it
+   directly via a temporary debug endpoint — nothing unusual, no `intents`/`pipeline`
+   overrides.
+5. **Stale/duplicate `ovos-messagebus` process from an earlier restart, our API talking to
+   the wrong one?** No — `ps aux` via a temporary debug endpoint showed exactly one of each
+   process, even after a clean `stop`+`start`.
+6. **Newer `ovos-core` installed on real hardware than the sandbox tested** (since
+   `constraints-alpha.txt` is a live URL fetched hours apart)? No — `/debug/versions`
+   confirmed identical versions (`ovos-core==2.6.0a1`, same `ovos-bus-client`,
+   `ovos-workshop`, etc.) on both.
+7. **A network-dependent pipeline matcher (`ovos-common-query-pipeline-plugin`,
+   `ovos-persona-pipeline-plugin`) hanging forever on an unreachable network call?**
+   Blacklisted both via `intents.blacklisted_pipelines` and retested — still hung identically.
+   Also: reading `ovos_core`'s own source showed the one confirmed network call after a match
+   (`_upload_match_data`, an anonymous metrics upload to `metrics.tigregotico.pt`) runs via
+   `create_daemon()` — a genuine background thread that structurally cannot block
+   `handle_utterance`'s own return, so it was never a viable culprit even before testing.
+
+**What actually found it**: SSH access to a real, independently-running OVOS installation
+(`ovos-installer`-based Docker deployment, 10 days uptime, `ovos_core` container marked
+`healthy`) that answers `"what time is it"` correctly. Two things stood out on direct
+comparison:
+
+- `docker exec ovos_core cat /etc/os-release` → **Debian GNU/Linux 13 (trixie)**, not Alpine.
+- `docker inspect ovos_core` → `docker.io/smartgic/ovos-core:testing` — OVOS's own official
+  image. Confirmed via Docker Hub: `smartgic/ovos-core`'s own badges list a "Debian version",
+  never Alpine.
+
+The installed package versions on that known-good box were also markedly older
+(`ovos_core==2.1.2a1` vs. our `2.6.0a1`, `ovos_bus_client==1.3.8a4` vs. `2.7.3a1`) — a second,
+real difference, but not the one landed on as primary: version drift alone doesn't explain why
+our *own* sandbox spike (same `2.6.0a1`, same Debian/Ubuntu-family OS) worked correctly while
+the Alpine Supervisor build hung. Holding the OS/libc constant and varying only the version
+wasn't tested directly, so a version-only explanation can't be fully ruled out — but the
+OS/libc difference is the one variable that's different between "sandbox spike (worked)" and
+"Supervisor build (hung)" while everything else (recipe, versions, config) was identical.
+
+**Why this is plausible mechanically**: `ovos-core[lgpl]` pulls in Padatious, a C++
+library (via SWIG bindings) built against `fann2`. Alpine's `musl` libc vs. glibc is a known,
+recurring source of subtle, silent misbehavior in compiled C/C++ extensions — not a crash,
+which would show up in logs, but a hang, which is exactly what was observed. A Home Assistant
+Community forum thread turned up during this investigation describes the same *class* of
+problem independently: a compiled binary dependency failing on Alpine, working fine rebuilt
+on Debian.
+
+**The fix**: this add-on's `Dockerfile` now builds `FROM
+ghcr.io/home-assistant/${BUILD_ARCH}-base-debian:latest` instead of the Alpine
+`ghcr.io/home-assistant/base:latest` every other add-on in this project uses. Deliberate,
+documented, narrow exception — see the Dockerfile's own comment for the reasoning. The other
+five add-ons stay on Alpine: none of them carry `ovos-core[lgpl]`'s specific compiled
+dependency, the one piece of this puzzle with concrete evidence of Alpine-specific
+misbehavior, and HA's own docs are explicit that Alpine is the preferred, idiomatic base for
+apps in general — this is a targeted deviation for a specific, evidenced reason, not a
+project-wide change.
+
+**Multi-arch note**: `build.yaml`'s `build_from` mechanism is deprecated as of Supervisor's
+2026.04 builder migration — base images are now set directly via `FROM` in the Dockerfile,
+using the `BUILD_ARCH` build arg Supervisor provides automatically
+(`ghcr.io/home-assistant/${BUILD_ARCH}-base-debian:latest` resolves correctly for both
+`amd64` and `aarch64`, confirmed both image variants exist).
+
+**Not yet done**: rebuild and retest on real hardware with this fix. Everything above is the
+investigation and the reasoned fix; the actual Debian-based `docker build` succeeding, and
+`/ask` returning a real answer, has not yet been confirmed at the time of writing.
 
 
 ## What this add-on is for
@@ -153,25 +237,29 @@ this session.
 
 ## Not yet done
 
-- **The Alpine-based Docker build itself is unverified.** The sandbox spike ran on a
-  Debian/Ubuntu sandbox — good enough to confirm the *mechanism* (install recipe, skill
-  discovery, the Q&A round trip via the real `api.py`), but the actual `docker build` on
-  Alpine has never run. Specific known risk: `fann-dev` (needed for the `[lgpl]` extra's
-  `fann2` wheel) is confirmed to exist in Alpine's `community` repository via
-  pkgs.alpinelinux.org, but whether HA's `ghcr.io/home-assistant/base:latest` has `community`
-  enabled by default hasn't been checked — first real build on the NUC is the actual test.
+- **The Debian-based Docker build (the Alpine-hang fix) is unverified.** Reasoned and
+  implemented (see "The Alpine hang" above), but not yet rebuilt/retested on real hardware at
+  the time of writing. First priority next session.
+- **Temporary debug endpoints still in `api.py`** (`/debug/skill-files`, `/debug/mycroft-conf`,
+  `/debug/ask-verbose`, `/debug/processes`, `/debug/versions`) — leave them in until the
+  Debian fix is confirmed working end-to-end (they may be needed again if it isn't), then
+  remove.
 - **The shared-bus binding (`websocket.host: 0.0.0.0`) is unverified for real
   container-to-container traffic.** `run.sh` sets it, reasoning from `ovos-skills` never
-  needing to (its bus is deliberately private, defaults are enough there) — but the sandbox
-  spike only ever tested bus access from within the same container/process. First real test of
-  actual cross-container reachability is wiring `ovos-skills` to point at this bus.
+  needing to (its bus is deliberately private, defaults are enough there) — but neither the
+  sandbox spike nor the Alpine-hang investigation tested bus access from a genuinely separate
+  container. First real test is wiring `ovos-skills` to point at this bus.
+- `intents.blacklisted_pipelines` currently blacklists `ovos-common-query-pipeline-plugin` and
+  `ovos-persona-pipeline-plugin` in `run.sh` — added to test (and rule out) the
+  hanging-network-call hypothesis during the Alpine-hang investigation. Harmless to leave, but
+  reconsider once the Debian fix is confirmed: those pipelines may be worth having back.
 - Skills-first vs. fallback routing logic (v1 scope from `DEVELOPER.md`) unbuilt and untested.
 - Hot-install via the shared bus (`ovos-skills` emitting `ovos.skills.install.complete` onto
   *this* add-on's bus instead of its own private one) — `ovos-skills` itself hasn't been
   changed to point at a shared bus yet; still using its own private, internal one.
-- `/share/mycroft/mycroft.conf` integration beyond the `websocket` block `run.sh` writes — not
-  yet checked whether `ovos-core`'s own config loading conflicts with or needs anything
-  different from the convention the other four add-ons already share.
+- `/share/mycroft/mycroft.conf` integration beyond the `websocket`/`intents` blocks `run.sh`
+  writes — not yet checked whether `ovos-core`'s own config loading conflicts with or needs
+  anything different from the convention the other four add-ons already share.
 - v2 (proactive speech via `assist_satellite.announce`) — explicitly out of scope until v1
   exists, per `DEVELOPER.md`.
 - HA conversation-agent side: nothing built yet on the `ha-ovos-integration` side to actually
