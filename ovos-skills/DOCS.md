@@ -49,14 +49,21 @@ in HA.
    pointing `skills.installer.constraints` at an empty local file instead of OVOS's default
    URL — `SkillsStore` still requires a valid, existing constraints file, an empty one just
    pins nothing.
-4. **Uninstall was a stub on PyPI.** The latest published `ovos-core` (2.1.1) has
-   `handle_uninstall_skill()` return `"pip uninstall not yet implemented"` — confirmed on
-   real hardware: install works, uninstall doesn't. The `dev` branch has a real
-   implementation (verified directly by reading its source). Same "PyPI lags `dev`" pattern
-   hit with `ovos-persona-server` earlier — installing from `git@dev` instead of PyPI now.
+4. **Uninstall is currently a stub upstream, staying that way for now.** The published
+   `ovos-core` (2.1.1, PyPI) has `handle_uninstall_skill()` return
+   `"pip uninstall not yet implemented"`. `dev` has a real implementation, but switching to
+   it broke the build: `ovos-core@dev` requires much newer `ovos_bus_client`/`ovos-config`
+   than `ovos-messagebus` provides, and `ovos-messagebus`'s own `dev` branch doesn't match
+   either (confirmed via `pip check` — real conflicts remain, two independently drifting dev
+   branches, not a matched pair). Reverted to PyPI: install is fully verified working
+   end-to-end; **`DELETE /skills/{id}` currently fails with "pip uninstall not yet
+   implemented"** until a PyPI release catches up or a genuinely compatible combination is
+   found.
 
 ## Known limitations
 
+- **`DELETE /skills/{id}` doesn't work yet** — upstream `SkillsStore.handle_uninstall_skill()`
+  is a stub on the current PyPI `ovos-core`. See "What was fixed on real hardware" above.
 - `GET /skills` (list installed) is a naming-convention heuristic — confirmed working against
   a real installed skill (`ovos-skill-date-time`), but still just a heuristic, not a
   guaranteed-correct mechanism for skills that don't follow the naming convention.
