@@ -22,14 +22,6 @@ RUN apk add --no-cache python3 py3-pip jq git \
       "git+https://github.com/OpenVoiceOS/ovos-persona-server.git@dev" \
       ovos-ddg-solver-plugin ovos-solver-failure-plugin
 
-# Upstream bug workaround: run_chat()/run_stream()'s stateless path passes
-# raw OpenAI-style message dicts straight to Persona.chat/stream, whose type
-# contract is List[AgentMessage] — QuestionSolver-based plugins then crash
-# on messages[-1].content. Patch in place until merged upstream.
-# See: https://github.com/OpenVoiceOS/ovos-persona-server/pull/67
-COPY patch_persona.py /tmp/patch_persona.py
-RUN python3 /tmp/patch_persona.py && rm /tmp/patch_persona.py
-
 COPY run.sh /
 RUN chmod a+x /run.sh
 CMD [ "/run.sh" ]
