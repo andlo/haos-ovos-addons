@@ -10,17 +10,20 @@ mkdir -p "${CONF_DIR}"
 
 # CRITICAL, unlike ovos-skills' own private bus: this messagebus needs to
 # be reachable from OTHER add-on containers (ovos-skills today, others
-# later -- see DEVELOPER.md's shared-messagebus architecture). The
-# messagebus library's own default host is 127.0.0.1 -- confirmed by
-# ovos-skills never setting this (its bus is deliberately private, never
-# needs to leave its own container). Explicitly bind 0.0.0.0 here, or no
-# other container can ever reach this bus, no matter what ports.yaml says.
+# later -- see DEVELOPER.md's shared-messagebus architecture).
 #
-# NOT YET CONFIRMED ON REAL HARDWARE: the sandbox spike only tested the
-# bus from within the same container/process, never a genuine
-# container-to-container connection. First real test of that specifically
-# is wiring ovos-skills to point at this shared bus instead of its own.
-jq '. + {websocket: ((.websocket // {}) + {host: "0.0.0.0", port: 8181})}' \
+# NOT "0.0.0.0": confirmed by reading ovos-messagebus/ovos-skill-installer/
+# ovos-skill-launcher source directly, all three read this SAME shared
+# key via Configuration() with no override mechanism -- there is no way
+# to give ovos-core's own bind address a different value from what every
+# other container reads as the CONNECT address, since it's the same file.
+# "0.0.0.0" is a valid bind address but a meaningless connect target for
+# a remote container. Using this add-on's own real hostname instead --
+# testing the hypothesis that binding to your own resolvable hostname
+# (not just 0.0.0.0) still works and IS externally reachable, since it's
+# the only value that can be simultaneously correct for both purposes.
+# NOT YET CONFIRMED — this is the first real test of it.
+jq '. + {websocket: ((.websocket // {}) + {host: "b8e040e3-ovos-core", port: 8181})}' \
   "${CONF_FILE}" > "${CONF_FILE}.tmp" && mv "${CONF_FILE}.tmp" "${CONF_FILE}"
 
 # TEMPORARY DIAGNOSTIC, kept harmless: blacklisted these two during the
@@ -71,12 +74,16 @@ if [ -n "${EXTRA_PIP}" ]; then
     -c /etc/ovos-constraints-alpha.txt
 fi
 
-bashio::log.info "Starting shared ovos-messagebus on 0.0.0.0:8181"
+bashio::log.info "Starting shared ovos-messagebus on b8e040e3-ovos-core:8181"
 ovos-messagebus &
 MB_PID=$!
 
+# Checking the own hostname, not localhost -- if binding to the specific
+# hostname (not 0.0.0.0) means it no longer also listens on loopback,
+# checking localhost here would give a false negative even if the bus
+# started fine on its real bind address.
 for i in $(seq 1 20); do
-  (exec 3<>/dev/tcp/localhost/8181) 2>/dev/null && { exec 3>&- 3<&-; break; }
+  (exec 3<>/dev/tcp/b8e040e3-ovos-core/8181) 2>/dev/null && { exec 3>&- 3<&-; break; }
   sleep 0.5
 done
 
