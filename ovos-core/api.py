@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import subprocess
 import threading
 from contextlib import asynccontextmanager
@@ -101,6 +102,23 @@ def autoconfigure(req: AutoconfigureRequest):
     reconciliation with those fields is NOT built yet, deliberately left
     for that layer to decide, not silently overwritten here without the
     caller knowing).
+
+    Also confirmed by reading OVOS's own documentation (ovos-docker's
+    Wyoming plugin install docs, and the ovos-installer manual's own
+    "the installer... might not always select the best defaults, run
+    autoconfigure --help after" note): autoconfigure choosing a plugin
+    and that plugin actually being installed are two separate steps in
+    OVOS's own official workflow, not one automatic action -- confirmed
+    for real on a genuine OVOS venv install, where the active tts/stt
+    module in mycroft.conf wasn't installed at all. This endpoint
+    doesn't try to install anything either, for the same reason: no
+    reliable way exists to derive a real pip package name from an OVOS
+    module name (confirmed for real -- "ovos-tts-plugin-phoonnx" is the
+    module name, "phoonnx" is the actual PyPI package). Always reports
+    tts_module/stt_module so the caller can tell the person what's
+    active and let them add it to the right add-on's own extra pip
+    packages if needed -- the same two-step process OVOS's own tooling
+    expects.
     """
     cmd = ["ovos-config", "autoconfigure", "--lang", req.lang]
     if req.online:
@@ -124,9 +142,24 @@ def autoconfigure(req: AutoconfigureRequest):
             detail=(result.stderr or result.stdout or "autoconfigure failed").strip(),
         )
 
+    # autoconfigure exits 0 even when it found nothing for the requested
+    # lang/mode/voice combination -- confirmed by reading its source: a
+    # missing recommends file for that combination just logs
+    # "ERROR: {folder} not available for {lang}" to stdout and returns
+    # early, leaving that section unchanged. Parsed here so the caller
+    # can tell "ran fine, nothing to pick for this combination" apart
+    # from "picked something new" instead of only seeing changed_keys
+    # stay empty either way.
+    not_available = re.findall(r"ERROR: (\w+) not available for (.+)", result.stdout)
+
     after = _read_shared_config()
     changed = {k: v for k, v in after.items() if before.get(k) != v}
-    return {"changed_keys": changed}
+    return {
+        "changed_keys": changed,
+        "not_available": [{"category": cat, "lang": lang} for cat, lang in not_available],
+        "tts_module": after.get("tts", {}).get("module"),
+        "stt_module": after.get("stt", {}).get("module"),
+    }
 
 
 def _read_shared_config() -> dict:
