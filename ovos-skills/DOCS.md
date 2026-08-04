@@ -49,11 +49,21 @@ in HA.
    pointing `skills.installer.constraints` at an empty local file instead of OVOS's default
    URL — `SkillsStore` still requires a valid, existing constraints file, an empty one just
    pins nothing.
+4. **Uninstall was a stub on PyPI.** The latest published `ovos-core` (2.1.1) has
+   `handle_uninstall_skill()` return `"pip uninstall not yet implemented"` — confirmed on
+   real hardware: install works, uninstall doesn't. The `dev` branch has a real
+   implementation (verified directly by reading its source). Same "PyPI lags `dev`" pattern
+   hit with `ovos-persona-server` earlier — installing from `git@dev` instead of PyPI now.
 
 ## Known limitations
 
-- `GET /skills` (list installed) is a naming-convention heuristic, not confirmed against a
-  real installed skill yet.
+- `GET /skills` (list installed) is a naming-convention heuristic — confirmed working against
+  a real installed skill (`ovos-skill-date-time`), but still just a heuristic, not a
+  guaranteed-correct mechanism for skills that don't follow the naming convention.
+- **Skills installed at runtime don't survive an add-on rebuild/update.** Confirmed on
+  hardware: updating the add-on to a new version wiped a previously-installed skill, because
+  `pip install` writes into the container's own filesystem layer, not a mapped volume. Not
+  yet fixed — a real gap for anyone who updates this add-on after installing skills.
 - Explicitly does not make skills respond to voice queries — that needs OVOS's
   messagebus/HiveMind bridged into Assist, which doesn't exist yet. This add-on only makes
   skills installable and configurable.
