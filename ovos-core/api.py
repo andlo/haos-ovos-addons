@@ -95,6 +95,20 @@ def debug_mycroft_conf():
     return {"exists": True, "path": path, "content": content}
 
 
+@app.get("/debug/processes")
+def debug_processes():
+    """TEMPORARY: /debug/ask-verbose showed our own bus client sees
+    NOTHING back after emitting an utterance, even though ovos-core's own
+    log clearly shows it parsing the utterance -- suspect our client may
+    be talking to a stale/duplicate messagebus process left over from an
+    earlier restart, not the one ovos-core is actually using. Remove once
+    resolved.
+    """
+    import subprocess
+    result = subprocess.run(["ps", "aux"], capture_output=True, text=True)
+    return {"ps_aux": result.stdout}
+
+
 @app.post("/debug/ask-verbose")
 def debug_ask_verbose(req: AskRequest):
     """TEMPORARY: neither resource files nor lang explain the missing
