@@ -31,6 +31,10 @@ Install and start the add-on. Add skills from Home Assistant, via `ha-ovos-integ
 |---|---|
 | `log_level` | `debug`, `info`, `warning`, or `error` |
 
+## Baseline packages
+
+Same as OVOS Skills -- every fresh venv gets `ovos-workshop` and `ovos-plugin-manager` installed first, before the skill's own package, to cover skills with incomplete dependency declarations.
+
 ## Persistence
 
 Same model as OVOS Skills — only a small manifest persists, on its own path (`/share/ovos-skills-extra/manifest.json`, separate from OVOS Skills' own, so the two add-ons never interfere even if both install a skill with the same name). Each skill's venv is rebuilt fresh from that manifest on every container start. A shared, persistent pip cache (`/share/ovos-pip-cache`, shared with every other add-on) means the underlying packages usually don't need re-downloading.

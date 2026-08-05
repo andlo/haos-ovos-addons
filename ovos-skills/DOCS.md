@@ -45,6 +45,10 @@ Installing prefers a real, published PyPI release over the catalog's git source 
 |---|---|
 | `log_level` | `debug`, `info`, `warning`, or `error` |
 
+## Baseline packages
+
+Every fresh venv gets `ovos-workshop` and `ovos-plugin-manager` installed first, before the skill's own package. Several OVOS skills (and even `ovos-workshop` itself, in some versions) don't declare their own real runtime dependencies correctly, assuming a full, shared OVOS environment is already present -- this baseline covers that gap without reintroducing any cross-skill conflict risk, since it's still per-venv and gets upgraded/downgraded automatically if a skill's own package requires a different version.
+
 ## Persistence
 
 Only a small manifest (`skill_id → source, package_name`) persists, on `/share`. Each skill's own venv lives in the add-on's own container filesystem and is rebuilt from that manifest on every container start — a fresh install per skill, not a stored copy. This is deliberate: simpler and more robust than trying to persist and restore the venvs themselves. A shared, persistent pip cache (`/share/ovos-pip-cache`) means the underlying packages usually don't need re-downloading even so.

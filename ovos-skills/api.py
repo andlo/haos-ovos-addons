@@ -335,6 +335,40 @@ def _resolve_install_target(pip_bin: str, source: str) -> str:
     return source
 
 
+# Pre-installed into every fresh venv, before the skill's own package --
+# confirmed for real, this session: many OVOS skills (and even
+# ovos-workshop itself, in some versions) don't declare their own real
+# runtime dependencies correctly, silently relying on a full, shared
+# OVOS environment already being present the classic way (the same
+# model venv-per-skill deliberately moved away from). Confirmed
+# directly: ovos-workshop 7.0.6's own declared Requires list omits
+# ovos-plugin-manager entirely, even though ovos_workshop.skills.ovos
+# imports from it directly -- the exact cause of skill-ovos-stop's
+# ModuleNotFoundError (see DEVELOPER.md / issue #1). Installing these
+# unpinned (latest) first, then the skill's own package, does NOT
+# reintroduce the version-conflict risk venv-per-skill was built to
+# eliminate: each skill still gets its own, fully isolated venv, and
+# pip's own dependency resolver correctly upgrades/downgrades this
+# baseline afterward if the skill's own package declares a real,
+# stricter requirement -- this is just a better default starting point
+# within that same isolated venv, not a shared, forced version.
+BASELINE_PACKAGES = ["ovos-workshop", "ovos-plugin-manager"]
+
+
+def _venv_pip_install_baseline(venv_dir: str) -> None:
+    pip_bin = os.path.join(venv_dir, "bin", "pip")
+    try:
+        subprocess.run(
+            [pip_bin, "install", "--no-input", "--cache-dir=/share/ovos-pip-cache", *BASELINE_PACKAGES],
+            capture_output=True, text=True, timeout=INSTALL_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        LOG.warning(f"Baseline package install timed out for {venv_dir} -- continuing anyway")
+    # Failure here is deliberately non-fatal: worst case, a skill falls
+    # back to needing its own complete, correct dependency declaration,
+    # exactly like before this existed -- not a new way to fail.
+
+
 def _venv_pip_install(venv_dir: str, source: str) -> tuple[bool, str]:
     pip_bin = os.path.join(venv_dir, "bin", "pip")
     target = _pip_installable(source)
@@ -470,6 +504,8 @@ def _install_skill_into_venv(source: str) -> dict | None:
         shutil.rmtree(tmp_dir, ignore_errors=True)
         return None
 
+    _venv_pip_install_baseline(tmp_dir)
+
     install_target = _resolve_install_target(os.path.join(tmp_dir, "bin", "pip"), source)
 
     ok, err = _venv_pip_install(tmp_dir, install_target)
@@ -522,6 +558,7 @@ def _rebuild_all_venvs_from_manifest():
         if not ok:
             LOG.error(f"Failed to rebuild venv for {skill_id}: {err}")
             continue
+        _venv_pip_install_baseline(venv_dir)
         ok, err = _venv_pip_install(venv_dir, entry["source"])
         if not ok:
             LOG.error(f"Failed to reinstall {skill_id} into its venv: {err}")
