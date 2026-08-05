@@ -463,55 +463,6 @@ class InstallRequest(BaseModel):
     url: str
 
 
-_debug_grep_result = {"status": "not started"}
-
-
-def _run_debug_grep(needle: str):
-    results = []
-    if os.path.isdir(VENV_ROOT):
-        try:
-            out = subprocess.run(
-                ["grep", "-rln", needle, VENV_ROOT],
-                capture_output=True, text=True, timeout=120,
-            )
-            if out.stdout:
-                results.append(out.stdout)
-            if out.stderr:
-                results.append(f"stderr: {out.stderr}")
-        except (subprocess.TimeoutExpired, OSError) as exc:
-            results.append(f"error: {exc}")
-    _debug_grep_result["status"] = "complete"
-    _debug_grep_result["matches"] = results or ["no matches found in any skill venv"]
-
-
-@app.post("/debug/grep-source")
-def debug_grep_source_start(needle: str):
-    """TEMPORARY -- async, since a full grep across every skill's venv
-    can take longer than a typical client's own request timeout. Poll
-    GET /debug/grep-source for the result. See DEVELOPER.md.
-    """
-    _debug_grep_result["status"] = "pending"
-    threading.Thread(target=_run_debug_grep, args=(needle,), daemon=True).start()
-    return {"status": "pending"}
-
-
-@app.get("/debug/grep-source")
-def debug_grep_source_poll():
-    return _debug_grep_result
-
-
-@app.get("/debug/read-file")
-def debug_read_file(path: str):
-    """TEMPORARY -- read a specific file for inspection. See DEVELOPER.md."""
-    if not path.startswith(VENV_ROOT):
-        raise HTTPException(status_code=400, detail="only paths under VENV_ROOT allowed")
-    try:
-        with open(path, encoding="utf-8", errors="replace") as f:
-            return {"content": f.read()}
-    except OSError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
-
-
 @app.get("/health")
 def health():
     # No messagebus connection to report on anymore -- this add-on no
