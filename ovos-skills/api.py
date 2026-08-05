@@ -463,6 +463,27 @@ class InstallRequest(BaseModel):
     url: str
 
 
+@app.get("/debug/grep-source")
+def debug_grep_source(needle: str):
+    """TEMPORARY -- search every skill's own venv for the literal source
+    of a suspicious log string. See DEVELOPER.md.
+    """
+    results = []
+    if os.path.isdir(VENV_ROOT):
+        try:
+            out = subprocess.run(
+                ["grep", "-rln", "--include=*.py", needle, VENV_ROOT],
+                capture_output=True, text=True, timeout=60,
+            )
+            if out.stdout:
+                results.append(out.stdout)
+            if out.stderr:
+                results.append(f"stderr: {out.stderr}")
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            results.append(f"error: {exc}")
+    return {"matches": results or ["no matches found in any skill venv"]}
+
+
 @app.get("/health")
 def health():
     # No messagebus connection to report on anymore -- this add-on no
