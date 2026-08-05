@@ -472,7 +472,7 @@ def debug_grep_source(needle: str):
     if os.path.isdir(VENV_ROOT):
         try:
             out = subprocess.run(
-                ["grep", "-rln", "--include=*.py", needle, VENV_ROOT],
+                ["grep", "-rln", needle, VENV_ROOT],
                 capture_output=True, text=True, timeout=60,
             )
             if out.stdout:
