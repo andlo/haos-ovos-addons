@@ -1,5 +1,5 @@
 name: "OVOS Core"
-version: "0.0.5"
+version: "0.0.6"
 slug: "ovos_core"
 description: "OVOS skill runtime — loads installed skills and answers questions via a synchronous HTTP endpoint, usable as a Home Assistant conversation agent"
 url: "https://github.com/andlo/haos-ovos-addons/tree/master/ovos-core"

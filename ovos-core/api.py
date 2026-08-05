@@ -68,8 +68,8 @@ def debug_grep_source(needle: str):
     for sp_dir in site.getsitepackages():
         try:
             out = subprocess.run(
-                ["grep", "-rn", needle, sp_dir],
-                capture_output=True, text=True, timeout=30,
+                ["grep", "-rln", "--include=*.py", needle, sp_dir],
+                capture_output=True, text=True, timeout=60,
             )
             if out.stdout:
                 results.append(out.stdout)
