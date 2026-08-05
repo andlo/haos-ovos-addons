@@ -1,0 +1,170 @@
+[
+  {
+    "skill_id": "skill-ovos-date-time.openvoiceos",
+    "name": "Date and Time",
+    "description": "Answers questions about the current date and time.",
+    "source": "https://github.com/OpenVoiceOS/skill-ovos-date-time",
+    "package_name": "ovos-skill-date-time",
+    "default": true
+  },
+  {
+    "skill_id": "ovos-skill-alerts.openvoiceos",
+    "name": "Alerts",
+    "description": "Alarms, timers, and reminders.",
+    "source": "https://github.com/OpenVoiceOS/ovos-skill-alerts",
+    "package_name": "ovos-skill-alerts",
+    "default": true
+  },
+  {
+    "skill_id": "ovos-skill-fallback-unknown.openvoiceos",
+    "name": "Fallback: Unknown",
+    "description": "Gives a clear \"I don't understand\" response when nothing else matches, instead of silence.",
+    "source": "https://github.com/OpenVoiceOS/ovos-skill-fallback-unknown",
+    "package_name": "ovos-skill-fallback-unknown",
+    "default": true
+  },
+  {
+    "skill_id": "ovos-skill-weather.openvoiceos",
+    "name": "Weather",
+    "description": "Current conditions and forecasts.",
+    "source": "https://github.com/OpenVoiceOS/ovos-skill-weather",
+    "package_name": "ovos-skill-weather",
+    "default": true
+  },
+  {
+    "skill_id": "ovos-skill-ip.openvoiceos",
+    "name": "IP Address",
+    "description": "Reads back this device's local IP address.",
+    "source": "https://github.com/OpenVoiceOS/ovos-skill-ip",
+    "package_name": "ovos-skill-ip",
+    "default": true
+  },
+  {
+    "skill_id": "skill-ovos-stop.openvoiceos",
+    "name": "Stop",
+    "description": "Handles \"stop\" -- lets other skills (e.g. a ringing alarm) listen for it and cancel themselves.",
+    "source": "https://github.com/OpenVoiceOS/skill-ovos-stop",
+    "package_name": "ovos-skill-stop",
+    "default": true
+  },
+  {
+    "skill_id": "skill-ovos-dictation.openvoiceos",
+    "name": "Dictation",
+    "description": "Free-form dictation mode.",
+    "source": "https://github.com/OpenVoiceOS/skill-ovos-dictation",
+    "package_name": "ovos-skill-dictation",
+    "default": false
+  },
+  {
+    "skill_id": "skill-ovos-news.openvoiceos",
+    "name": "News Streams",
+    "description": "Plays news audio streams. KNOWN BROKEN: needs a running ovos-media service to actually play audio, which this project's architecture doesn't provide -- not usable yet.",
+    "source": "https://github.com/OpenVoiceOS/skill-ovos-news",
+    "package_name": "ovos-skill-news",
+    "default": false
+  },
+  {
+    "skill_id": "ovos-skill-confucius-quotes.openvoiceos",
+    "name": "Confucius Quotes",
+    "description": "Quotes and basic biographical facts about Confucius.",
+    "source": "https://github.com/OpenVoiceOS/ovos-skill-confucius-quotes",
+    "package_name": "ovos-skill-confucius-quotes",
+    "default": false
+  },
+  {
+    "skill_id": "ovos-skill-days-in-history.openvoiceos",
+    "name": "Days in History",
+    "description": "Historical events for today or any other calendar day, via Wikipedia.",
+    "source": "https://github.com/OpenVoiceOS/ovos-skill-days-in-history",
+    "package_name": "ovos-skill-days-in-history",
+    "default": false
+  },
+  {
+    "skill_id": "ovos-skill-iss-location.openvoiceos",
+    "name": "ISS Location",
+    "description": "Tracks the current location of the International Space Station.",
+    "source": "https://github.com/OpenVoiceOS/ovos-skill-iss-location",
+    "package_name": "ovos-skill-iss-location",
+    "default": false
+  },
+  {
+    "skill_id": "ovos-skill-moviemaster.openvoiceos",
+    "name": "MovieMaster",
+    "description": "Information about movies, actors, and production details.",
+    "source": "https://github.com/OpenVoiceOS/ovos-skill-moviemaster",
+    "package_name": "ovos-skill-moviemaster",
+    "default": false
+  },
+  {
+    "skill_id": "ovos-skill-number-facts.openvoiceos",
+    "name": "Number Facts",
+    "description": "Trivia and facts about numbers, dates, and years.",
+    "source": "https://github.com/OVOSHatchery/ovos-skill-number-facts",
+    "package_name": "ovos-skill-number-facts",
+    "default": false
+  },
+  {
+    "skill_id": "ovos-skill-personal.openvoiceos",
+    "name": "Personal",
+    "description": "Answers questions about the assistant's own history and origins (e.g. \"who made you\").",
+    "source": "https://github.com/OpenVoiceOS/ovos-skill-personal",
+    "package_name": "ovos-skill-personal",
+    "default": false
+  },
+  {
+    "skill_id": "ovos-skill-speedtest.openvoiceos",
+    "name": "Speed Test",
+    "description": "Runs an internet bandwidth test using speedtest.net.",
+    "source": "https://github.com/OpenVoiceOS/ovos-skill-speedtest",
+    "package_name": "ovos-skill-speedtest",
+    "default": false
+  },
+  {
+    "skill_id": "ovos-skill-wikihow.openvoiceos",
+    "name": "WikiHow",
+    "description": "How-to instructions for nearly everything, via WikiHow.",
+    "source": "https://github.com/OpenVoiceOS/ovos-skill-wikihow",
+    "package_name": "ovos-skill-wikihow",
+    "default": false
+  },
+  {
+    "skill_id": "skill-ovos-ddg.openvoiceos",
+    "name": "DuckDuckGo",
+    "description": "Answers factual questions using DuckDuckGo Instant Answers.",
+    "source": "https://github.com/OpenVoiceOS/ovos-skill-ddg",
+    "package_name": "ovos-skill-ddg",
+    "default": false
+  },
+  {
+    "skill_id": "ovos-skill-icanhazdadjokes.openvoiceos",
+    "name": "Dad Jokes",
+    "description": "Tells dad jokes on request.",
+    "source": "https://github.com/OpenVoiceOS/ovos-skill-icanhazdadjokes",
+    "package_name": "ovos-skill-icanhazdadjokes",
+    "default": false
+  },
+  {
+    "skill_id": "ovos-skill-parrot.openvoiceos",
+    "name": "Parrot",
+    "description": "Repeats back whatever you say to it.",
+    "source": "https://github.com/OpenVoiceOS/ovos-skill-parrot",
+    "package_name": "ovos-skill-parrot",
+    "default": false
+  },
+  {
+    "skill_id": "ovos-skill-spelling.openvoiceos",
+    "name": "Spelling",
+    "description": "Spells out words on request.",
+    "source": "https://github.com/OpenVoiceOS/skill-ovos-spelling",
+    "package_name": "ovos-skill-spelling",
+    "default": false
+  },
+  {
+    "skill_id": "ovos-skill-wikipedia.openvoiceos",
+    "name": "Wikipedia",
+    "description": "Answers general-knowledge questions via Wikipedia summaries.",
+    "source": "https://github.com/OpenVoiceOS/ovos-skill-wikipedia",
+    "package_name": "ovos-skill-wikipedia",
+    "default": false
+  }
+]

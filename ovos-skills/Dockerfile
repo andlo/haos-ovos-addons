@@ -19,6 +19,7 @@ RUN apk add --no-cache python3 py3-pip jq git build-base python3-dev \
       virtualenv fastapi uvicorn requests
 
 COPY api.py /api.py
+COPY catalog.json /catalog.json
 COPY run.sh /
 RUN chmod a+x /run.sh
 CMD [ "/run.sh" ]

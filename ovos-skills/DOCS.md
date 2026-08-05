@@ -10,6 +10,8 @@ Install and start the add-on. A small set of sensible default skills installs au
 
 ## Catalog
 
+Lives in `catalog.json`, not hardcoded in `api.py` — pure data (which skills, which are installed by default), editable without touching Python. `GET /catalog` re-reads it fresh on every call.
+
 | Skill | Installed by default? | Notes |
 |---|---|---|
 | Date and Time | Yes | |
@@ -20,6 +22,19 @@ Install and start the add-on. A small set of sensible default skills installs au
 | Stop | Yes | Lets other skills (e.g. a ringing alarm) listen for "stop" and cancel themselves |
 | Dictation | No | |
 | News Streams | No | **Known broken** — needs a separate audio-playback service (`ovos-media`) this project doesn't provide |
+| Confucius Quotes | No | |
+| Days in History | No | |
+| ISS Location | No | |
+| MovieMaster | No | |
+| Number Facts | No | |
+| Personal | No | About the assistant itself |
+| Speed Test | No | |
+| WikiHow | No | |
+| DuckDuckGo | No | Factual Q&A |
+| Dad Jokes | No | |
+| Parrot | No | Repeats back what you say |
+| Spelling | No | |
+| Wikipedia | No | |
 
 News Streams is kept visible, not deleted, so the gap is easy to revisit once a real media-playback bridge exists.
 

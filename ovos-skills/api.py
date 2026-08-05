@@ -77,110 +77,34 @@ INSTALL_TIMEOUT = 300  # venv create + pip install -- a slow git clone +
 # confirmed, by reading their own source, to rely on PHAL plugins
 # ("mycroft.volume.set" etc.) this setup has nothing listening for --
 # they'd load without error but silently do nothing, which is worse
-# than not offering them at all. Every skill below was individually
-# checked the same way before being added. Anything not vetted yet
-# belongs in the separate ovos-skills-extra add-on instead (see its own
-# DOCS.md), not here -- this list stays trustworthy by only ever
-# growing through the same verification, never by convenience.
+# than not offering them at all. Every skill in catalog.json was
+# individually checked the same way before being added. Anything not
+# vetted yet belongs in the separate ovos-skills-extra add-on instead
+# (see its own DOCS.md), not here -- this list stays trustworthy by
+# only ever growing through the same verification, never by
+# convenience.
+#
+# Lives in its own catalog.json file, not hardcoded here -- deliberate:
+# keeps this add-on's own PURE DATA (which skills, in/out of the
+# default set) separate from its code, editable without touching
+# Python, and matches the "the store" framing directly (a JSON file
+# really is just a small store listing).
 #
 # "default" entries are installed automatically on this add-on's very
 # first-ever boot (see _seed_default_skills_if_first_boot) -- a small,
 # sensible baseline so there's something useful from the start, the
 # same idea ovos-installer's own default skill set follows. Everything
 # else here is opt-in via the catalog UI, same as before.
-CURATED_CATALOG = [
-    {
-        "skill_id": "skill-ovos-date-time.openvoiceos",
-        "name": "Date and Time",
-        "description": "Answers questions about the current date and time.",
-        "source": "https://github.com/OpenVoiceOS/skill-ovos-date-time",
-        "package_name": "ovos-skill-date-time",
-        "default": True,
-    },
-    {
-        "skill_id": "ovos-skill-alerts.openvoiceos",
-        "name": "Alerts",
-        "description": "Alarms, timers, and reminders.",
-        "source": "https://github.com/OpenVoiceOS/ovos-skill-alerts",
-        "package_name": "ovos-skill-alerts",
-        "default": True,
-    },
-    {
-        "skill_id": "ovos-skill-fallback-unknown.openvoiceos",
-        "name": "Fallback: Unknown",
-        "description": "Gives a clear \"I don't understand\" response when nothing else "
-                        "matches, instead of silence.",
-        "source": "https://github.com/OpenVoiceOS/ovos-skill-fallback-unknown",
-        "package_name": "ovos-skill-fallback-unknown",
-        "default": True,
-    },
-    {
-        "skill_id": "ovos-skill-weather.openvoiceos",
-        "name": "Weather",
-        "description": "Current conditions and forecasts.",
-        "source": "https://github.com/OpenVoiceOS/ovos-skill-weather",
-        "package_name": "ovos-skill-weather",
-        "default": True,
-    },
-    {
-        "skill_id": "ovos-skill-ip.openvoiceos",
-        "name": "IP Address",
-        "description": "Reads back this device's local IP address.",
-        "source": "https://github.com/OpenVoiceOS/ovos-skill-ip",
-        "package_name": "ovos-skill-ip",
-        "default": True,
-    },
-    {
-        # Was broken (ModuleNotFoundError: ovos-plugin-manager, an
-        # upstream ovos-workshop dependency-declaration gap -- see
-        # BASELINE_PACKAGES's own docstring), now fixed by pre-installing
-        # ovos-workshop + ovos-plugin-manager as a baseline in every
-        # fresh venv. Confirmed working on real hardware after that fix.
-        "skill_id": "skill-ovos-stop.openvoiceos",
-        "name": "Stop",
-        "description": "Handles \"stop\" -- lets other skills (e.g. a ringing alarm) "
-                        "listen for it and cancel themselves.",
-        "source": "https://github.com/OpenVoiceOS/skill-ovos-stop",
-        "package_name": "ovos-skill-stop",
-        "default": True,
-    },
-    {
-        "skill_id": "skill-ovos-dictation.openvoiceos",
-        "name": "Dictation",
-        "description": "Free-form dictation mode.",
-        "source": "https://github.com/OpenVoiceOS/skill-ovos-dictation",
-        "package_name": "ovos-skill-dictation",
-        "default": False,
-    },
-    {
-        # NOT actually functional here -- confirmed for real, this
-        # session: like ovos-skill-volume/-naptime (PHAL-dependent),
-        # this skill has its own dependency this project's architecture
-        # doesn't provide, just a different one. NewsSkill extends
-        # OVOSCommonPlaybackSkill; play_media() emits
-        # "ovos.common_play.play" (confirmed by reading
-        # ovos_workshop.skills.common_play's own source), which needs a
-        # separate, running ovos-media service (OCP's actual audio
-        # backend) to pick up and stream real audio -- nothing in this
-        # project's stack does. Ran for hours on real hardware this
-        # session without ever actually confirmed to play audio -- it
-        # loads and responds without error, which is exactly the kind
-        # of silent, misleading non-functionality this catalog exists
-        # to screen out. Any other OCP-based media skill (local-media,
-        # somafm, pyradios, youtube-music, ...) would hit the identical
-        # wall. Revisit once/if a real media-playback bridge add-on
-        # exists (an ovos-media service that actually plays through, or
-        # hands off to, something -- e.g. an HA media_player entity).
-        "skill_id": "skill-ovos-news.openvoiceos",
-        "name": "News Streams",
-        "description": "Plays news audio streams. KNOWN BROKEN: needs a running "
-                        "ovos-media service to actually play audio, which this "
-                        "project's architecture doesn't provide -- not usable yet.",
-        "source": "https://github.com/OpenVoiceOS/skill-ovos-news",
-        "package_name": "ovos-skill-news",
-        "default": False,
-    },
-]
+CATALOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "catalog.json")
+
+
+def _read_catalog() -> list[dict]:
+    try:
+        with open(CATALOG_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError) as exc:
+        LOG.error(f"Could not read catalog.json: {exc}")
+        return []
 
 # Marker file, NOT "is the manifest empty" -- deliberately survives a
 # person later uninstalling a default skill on purpose. Seeding only
@@ -566,7 +490,7 @@ def _rebuild_all_venvs_from_manifest():
 
 
 def _seed_default_skills_if_first_boot():
-    """Install the small, curated default set (see CURATED_CATALOG) --
+    """Install the small, curated default set (see catalog.json) --
     but only once, ever, on this add-on's genuinely first boot. Checks
     a dedicated marker file, NOT whether the manifest happens to be
     empty right now -- someone who deliberately uninstalled every
@@ -577,7 +501,7 @@ def _seed_default_skills_if_first_boot():
     if os.path.isfile(DEFAULTS_SEEDED_MARKER):
         return
     manifest = _read_manifest()
-    for item in CURATED_CATALOG:
+    for item in _read_catalog():
         if not item.get("default"):
             continue
         # item["package_name"], not item["source"] -- confirmed for
@@ -755,13 +679,15 @@ def running_skills():
 
 @app.get("/catalog")
 def get_catalog():
-    """This add-on's own small, curated catalog (see CURATED_CATALOG's
-    docstring) -- NOT a proxy of the official OVOS skills-store feed
+    """This add-on's own small, curated catalog, read fresh from
+    catalog.json every call (not cached -- this file is small, and a
+    live re-read means the store can be edited without restarting the
+    add-on). NOT a proxy of the official OVOS skills-store feed
     anymore. Small enough to drive a dropdown directly, same response
-    shape as before ({"items": [...]})  so ha-ovos-integration's own
+    shape as before ({"items": [...]}) so ha-ovos-integration's own
     catalog-consuming code needs no changes.
     """
-    return {"items": CURATED_CATALOG}
+    return {"items": _read_catalog()}
 
 
 @app.get("/skills")
