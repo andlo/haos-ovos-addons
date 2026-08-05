@@ -18,6 +18,7 @@ for i in $(seq 1 60); do
 done
 
 mkdir -p /opt/skill-venvs
+mkdir -p /share/ovos-pip-cache
 
 bashio::log.info "Starting API on :8502 -- rebuilding any previously-installed skills' venvs from the persisted manifest first"
 exec python3 /api.py

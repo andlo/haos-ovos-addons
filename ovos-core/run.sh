@@ -80,9 +80,16 @@ jq '. + {intents: ((.intents // {}) + {pipeline: [
 ]})}' \
   "${CONF_FILE}" > "${CONF_FILE}.tmp" && mv "${CONF_FILE}.tmp" "${CONF_FILE}"
 
+# Shared, content-addressed pip cache on /share -- safe across every
+# add-on and every venv (keyed by package+version+hash, never a
+# collision risk), unlike sharing an actual installation would be.
+# Persists across rebuilds (unlike the add-on's own container
+# filesystem), so a package already fetched by ANY add-on or any
+# skill's own venv doesn't need re-downloading/re-building here again.
+mkdir -p /share/ovos-pip-cache
 if [ -n "${EXTRA_PIP}" ]; then
   bashio::log.info "Installing extra pip packages: ${EXTRA_PIP}"
-  pip install --no-cache-dir --break-system-packages ${EXTRA_PIP} \
+  pip install --cache-dir=/share/ovos-pip-cache --break-system-packages ${EXTRA_PIP} \
     -c /etc/ovos-constraints-alpha.txt
 fi
 

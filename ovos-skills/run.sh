@@ -23,6 +23,7 @@ for i in $(seq 1 60); do
 done
 
 mkdir -p /opt/skill-venvs
+mkdir -p /share/ovos-pip-cache
 
 # api.py's own lifespan handler rebuilds every skill's venv from the
 # persisted manifest.json (see its module docstring's "PERSISTENCE

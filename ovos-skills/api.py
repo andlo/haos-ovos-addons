@@ -340,7 +340,7 @@ def _venv_pip_install(venv_dir: str, source: str) -> tuple[bool, str]:
     target = _pip_installable(source)
     try:
         result = subprocess.run(
-            [pip_bin, "install", "--no-input", target],
+            [pip_bin, "install", "--no-input", "--cache-dir=/share/ovos-pip-cache", target],
             capture_output=True, text=True, timeout=INSTALL_TIMEOUT,
         )
     except subprocess.TimeoutExpired:

@@ -2,9 +2,16 @@
 EXTRA_PIP=$(bashio::config 'extra_pip_packages')
 SOLVER_CONFIG=$(bashio::config 'solver_config')
 
+# Shared, content-addressed pip cache on /share -- safe across every
+# add-on and every venv (keyed by package+version+hash, never a
+# collision risk), unlike sharing an actual installation would be.
+# Persists across rebuilds (unlike the add-on's own container
+# filesystem), so a package already fetched by ANY add-on or any
+# skill's own venv doesn't need re-downloading/re-building here again.
+mkdir -p /share/ovos-pip-cache
 if [ -n "${EXTRA_PIP}" ]; then
   bashio::log.info "Installing extra pip packages: ${EXTRA_PIP}"
-  pip install --no-cache-dir --break-system-packages ${EXTRA_PIP}
+  pip install --cache-dir=/share/ovos-pip-cache --break-system-packages ${EXTRA_PIP}
 fi
 
 # persona.json (solver list) stays add-on-private, not shared with the
