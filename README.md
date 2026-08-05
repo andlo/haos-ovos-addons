@@ -1,57 +1,31 @@
 # haos-ovos-addons
 
-![status](https://img.shields.io/badge/status-work%20in%20progress-orange)
-
 <img src="logo.png" width="96" height="96" alt="OpenVoiceOS logo">
 
-> 🚧 **Work in progress.** Nothing here has been tested in production yet. Use at your own risk.
-
-Home Assistant OS (Supervisor) add-ons that bridge [OpenVoiceOS](https://openvoiceos.org)
-into Home Assistant's Assist pipeline. Each add-on is a thin, well-defined wrapper around an
-existing, already-maintained OVOS component — not new, unproven code.
+Home Assistant OS (Supervisor) add-ons that bring [OpenVoiceOS](https://openvoiceos.org) into Home Assistant's own Assist pipeline — discoverable and configurable the way HAOS users already expect: Add-on Store, install, fill in a form.
 
 ## Add-ons in this repo
 
-| Add-on | Function | Wraps |
-|---|---|---|
-| `ovos-wyoming-tts` | TTS slot in the Assist pipeline | [wyoming-ovos-tts](https://github.com/OpenVoiceOS/wyoming-ovos-tts) |
-| `ovos-wyoming-stt` | STT slot in the Assist pipeline | wyoming-ovos-stt |
-| `ovos-wyoming-wakeword` | Wakeword slot in the Assist pipeline | wyoming-ovos-wakeword |
-| `ovos-persona` | Conversation agent (Ollama-compatible) | [ovos-persona-server](https://github.com/OpenVoiceOS/ovos-persona-server) |
-| `ovos-skills` | Install/remove/list OVOS skills via a small API | `ovos-core`'s own [SkillsStore](https://github.com/OpenVoiceOS/ovos-core/blob/dev/ovos_core/skill_installer.py), called by [ha-ovos-integration](https://github.com/andlo/ha-ovos-integration)'s config subentries |
-| `ovos-core` | Actually runs installed skills — intent matching, skill manager, a synchronous question/answer HTTP endpoint usable as a Home Assistant conversation agent | `ovos-core` itself, the real skill runtime (not just its `SkillsStore` submodule, unlike `ovos-skills` above) |
+| Add-on | What it does |
+|---|---|
+| `ovos-wyoming-tts` | Text-to-speech engine for the Assist pipeline, via any OVOS TTS plugin |
+| `ovos-wyoming-stt` | Speech-to-text engine for the Assist pipeline, via any OVOS STT plugin |
+| `ovos-wyoming-wakeword` | Wake word engine for the Assist pipeline, via any OVOS wake word plugin |
+| `ovos-persona` | Conversation agent (Ollama/OpenAI-compatible), for open-ended questions |
+| `ovos-core` | The skill runtime: shared messagebus, intent matching, and a synchronous question/answer API |
+| `ovos-skills` | Install/remove/configure a small, curated set of OVOS skills known to work in this setup |
+| `ovos-skills-extra` | Install ANY OVOS skill from PyPI or a git URL — unverified, unrestricted |
 
-`ovos-skill-config` (wrapping [ovos-skill-config-tool](https://github.com/OscillateLabsLLC/ovos-skill-config-tool))
-was planned but never built — superseded by config subentries in
-[ha-ovos-integration](https://github.com/andlo/ha-ovos-integration) instead.
+See each add-on's own `DOCS.md` for setup, configuration, and API details.
 
-## Why
+## How they fit together
 
-HAOS users already know the pattern: go to the Add-on Store, click install, fill in a form.
-OVOS's Wyoming bridges and persona server already exist and are maintained by the OVOS project —
-they just need this packaging to show up in HA's own world.
+- `ovos-wyoming-*` plug directly into HA's own Assist pipeline settings — no other add-on required.
+- `ovos-core` hosts the shared messagebus; `ovos-skills`/`ovos-skills-extra` launch each installed skill's own process against it.
+- `ovos-persona` is fully independent — runs with or without any of the others.
+- All add-ons that use a shared `mycroft.conf` (language, TTS/STT module, etc.) read and write it via `/share`.
 
-## Status
-
-All six add-ons build and are discovered by HA on real hardware — see each add-on's own
-`DOCS.md` for exactly what's verified and what isn't (e.g. persona's default answers are weak
-without a real LLM solver; `ovos-skills`' install/uninstall happy path is still being
-re-verified after a hardware-discovered fix, see its `DOCS.md`). `ovos-core` is the newest —
-confirmed answering real questions correctly end-to-end (`POST /ask` → a genuinely computed
-answer from an installed skill), but a real HA conversation-agent integration on top of it
-hasn't been built yet — see its `DOCS.md` for the full story, including a long but
-successfully-resolved investigation into a real-hardware-only performance issue.
-
-## Related repos
-
-- [ha-ovos-integration](https://github.com/andlo/ha-ovos-integration) — HA integration for shared config & per-skill management, calls `ovos-skills`' API
-
-## About
-
-Part of the **HA-OVOS** project: making it easy for a Home Assistant OS user to discover and
-use OpenVoiceOS, through interfaces that feel native to HAOS. This repo builds the actual
-Supervisor add-ons — see [ha-ovos-integration](https://github.com/andlo/ha-ovos-integration)
-for the HA-native configuration/skill-management layer built on top.
+Managed day-to-day through [ha-ovos-integration](https://github.com/andlo/ha-ovos-integration), a Home Assistant integration that turns skill installs, voice setup, and persona configuration into ordinary HA config flows — this repo is the add-ons it talks to.
 
 ## License
 
