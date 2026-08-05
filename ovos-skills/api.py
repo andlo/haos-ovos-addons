@@ -148,6 +148,65 @@ def _pip_installable(source: str) -> str:
     return f"git+{source}"
 
 
+def _repo_name_from_git_url(source: str) -> str | None:
+    """Derive a likely PyPI package name from a repo URL -- e.g.
+    "https://github.com/OpenVoiceOS/ovos-skill-alerts" ->
+    "ovos-skill-alerts". Only ever used as a CANDIDATE to check against
+    PyPI directly (_pypi_package_exists) -- never assumed correct on
+    its own, since a repo name matching a PyPI name isn't guaranteed
+    (confirmed elsewhere in this project: module names and real package
+    names, or catalog skill_ids and real runtime skill_ids, have both
+    been found to mismatch before).
+    """
+    if not source.startswith(("http://", "https://")):
+        return None
+    name = source.rstrip("/").rsplit("/", 1)[-1]
+    if name.endswith(".git"):
+        name = name[:-4]
+    return name or None
+
+
+def _pypi_package_exists(pip_bin: str, name: str) -> bool:
+    """Confirms `name` is a real, installable PyPI package via `pip
+    index versions` -- not assumed from the repo name alone. `pip
+    index` is marked experimental by pip itself but has been reliable
+    in practice throughout this project; only the return code is
+    trusted here, not its (occasionally noisy) output.
+    """
+    try:
+        result = subprocess.run(
+            [pip_bin, "index", "versions", name],
+            capture_output=True, text=True, timeout=30,
+        )
+        return result.returncode == 0
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+
+
+def _resolve_install_target(pip_bin: str, source: str) -> str:
+    """Prefer a real, published PyPI package over a git URL when one
+    exists under the repo's own name.
+
+    Confirmed for real, this session: git-installing a skill pulls
+    whatever's on its default branch, which is often a pre-release --
+    e.g. ovos-skill-alerts installed as 0.2.2a2 via git, while PyPI's
+    latest stable release was 0.1.28; ovos-skill-date-time similarly
+    (1.1.14a2 vs PyPI's 1.1.5). The official skills catalog's own
+    "source" field is git-URL-only by convention -- not something we
+    chose -- so without this check every skill installed through it
+    would default to an alpha/dev version even when a tested, versioned
+    release is available. Falls back to the git source unchanged when
+    no matching PyPI package is confirmed to exist -- never assumes a
+    derived name is correct without checking (see
+    _repo_name_from_git_url's own docstring for why).
+    """
+    candidate = _repo_name_from_git_url(source)
+    if candidate and _pypi_package_exists(pip_bin, candidate):
+        LOG.info(f"Preferring PyPI package '{candidate}' over git source {source}")
+        return candidate
+    return source
+
+
 def _venv_pip_install(venv_dir: str, source: str) -> tuple[bool, str]:
     pip_bin = os.path.join(venv_dir, "bin", "pip")
     target = _pip_installable(source)
@@ -283,22 +342,24 @@ def _install_skill_into_venv(source: str) -> dict | None:
         shutil.rmtree(tmp_dir, ignore_errors=True)
         return None
 
-    ok, err = _venv_pip_install(tmp_dir, source)
+    install_target = _resolve_install_target(os.path.join(tmp_dir, "bin", "pip"), source)
+
+    ok, err = _venv_pip_install(tmp_dir, install_target)
     if not ok:
-        LOG.error(f"pip install failed for {source}: {err}")
+        LOG.error(f"pip install failed for {install_target}: {err}")
         shutil.rmtree(tmp_dir, ignore_errors=True)
         return None
 
     entries = _venv_discover_skill(tmp_dir)
     if not entries:
-        LOG.error(f"No skill entry_point found after installing {source}")
+        LOG.error(f"No skill entry_point found after installing {install_target}")
         shutil.rmtree(tmp_dir, ignore_errors=True)
         return None
 
     chosen = entries[0]
     if len(entries) > 1:
         LOG.warning(
-            f"{source} registered {len(entries)} skill entry_points, "
+            f"{install_target} registered {len(entries)} skill entry_points, "
             f"using {chosen['skill_id']} (first)"
         )
 
@@ -309,7 +370,11 @@ def _install_skill_into_venv(source: str) -> dict | None:
     shutil.move(tmp_dir, final_dir)
     _rewrite_venv_shebangs(final_dir, tmp_dir, final_dir)
 
-    return {"skill_id": skill_id, "package_name": chosen["package_name"]}
+    # install_target, not the original source -- so the manifest (and
+    # therefore every future rebuild-on-restart) remembers the
+    # PyPI-preferred choice made here, rather than re-resolving it every
+    # time or silently reverting to the git source.
+    return {"skill_id": skill_id, "package_name": chosen["package_name"], "source": install_target}
 
 
 def _rebuild_all_venvs_from_manifest():
@@ -522,7 +587,12 @@ def _run_install_job(job_key: str, source: str):
         return
 
     manifest = _read_manifest()
-    manifest[result["skill_id"]] = {"source": source, "package_name": result["package_name"]}
+    # result["source"] is what was actually installed from -- may be a
+    # PyPI package name if _resolve_install_target found one, not
+    # necessarily the original git URL passed in. Storing that (not the
+    # raw `source` argument) means a future rebuild-on-restart reuses
+    # the same, already-resolved choice.
+    manifest[result["skill_id"]] = {"source": result["source"], "package_name": result["package_name"]}
     _write_manifest(manifest)
 
     # Gives the skill its first chance to write its own settings.json --
