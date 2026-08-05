@@ -26,13 +26,24 @@ mkdir -p "${CONF_DIR}"
 jq '. + {websocket: ((.websocket // {}) + {host: "b8e040e3-ovos-core", port: 8181})}' \
   "${CONF_FILE}" > "${CONF_FILE}.tmp" && mv "${CONF_FILE}.tmp" "${CONF_FILE}"
 
-# TEMPORARY DIAGNOSTIC, kept harmless: blacklisted these two during the
-# "is it hanging on a network call" investigation (see DOCS.md's "The
-# slow NUC" section -- it wasn't network, it was genuinely slow CPU-bound
-# matching). Left blacklisted since neither is needed for this add-on's
-# current scope (common-query and persona both need external services
-# this add-on doesn't set up); revisit once that scope grows.
-jq '. + {intents: ((.intents // {}) + {blacklisted_pipelines: ["ovos-common-query-pipeline-plugin", "ovos-persona-pipeline-plugin"]})}' \
+# ovos-common-query-pipeline-plugin RE-ENABLED -- the original
+# blacklist reasoning ("needs external services this add-on doesn't set
+# up") turned out to be wrong for this one: confirmed by reading
+# ovos_commonqa/opm.py's own source, it uses its own bus messages
+# (ovos.common_query.ping, common_query.question/response), answered
+# via ordinary speak_dialog by any installed "CommonQuerySkill" (e.g.
+# Wikipedia) -- the exact same mechanism already confirmed working for
+# weather/date-time via /ask. No external audio service needed, unlike
+# OCP-based media skills (see ovos-skills' own CURATED_CATALOG entry for
+# skill-ovos-news, which DOES need one and stays excluded). Likely just
+# blacklisted broadly, alongside persona, during the original "is it
+# hanging" investigation to cut noise, not for a real technical reason.
+#
+# ovos-persona-pipeline-plugin STAYS blacklisted -- this project already
+# has its own, separate persona bridge (see ovos-persona's own add-on
+# and DEVELOPER.md); this in-core pipeline plugin is a different,
+# redundant mechanism, not evaluated, left off deliberately.
+jq '. + {intents: ((.intents // {}) + {blacklisted_pipelines: ["ovos-persona-pipeline-plugin"]})}' \
   "${CONF_FILE}" > "${CONF_FILE}.tmp" && mv "${CONF_FILE}.tmp" "${CONF_FILE}"
 
 # THE ACTUAL FIX for the real root cause (see DOCS.md's "The slow NUC"):
@@ -60,6 +71,7 @@ jq '. + {intents: ((.intents // {}) + {pipeline: [
   "ovos-adapt-pipeline-plugin-high",
   "ovos-m2v-pipeline-high",
   "ovos-ocp-pipeline-plugin-medium",
+  "ovos-common-query-pipeline-plugin",
   "ovos-fallback-pipeline-plugin-high",
   "ovos-stop-pipeline-plugin-medium",
   "ovos-adapt-pipeline-plugin-medium",
