@@ -1,13 +1,12 @@
 # OVOS Wyoming TTS
 
-🚧 **v0.0.x — untested, work in progress.** Version stays below 0.1.0 until this has actually
-run successfully on a real HAOS install.
+Exposes any OVOS text-to-speech plugin over the [Wyoming protocol](https://github.com/rhasspy/wyoming), so it appears as a regular TTS option in Home Assistant's own Assist pipeline setup.
 
-## What it does
+## Setup
 
-Wraps [wyoming-ovos-tts](https://github.com/TigreGotico/wyoming-ovos-tts), exposing any OVOS
-TTS plugin via the Wyoming protocol. Once installed, it should appear as a text-to-speech
-option in **Settings → Voice assistants → Pipelines**.
+1. Install and start the add-on.
+2. Home Assistant discovers it automatically (Wyoming protocol discovery). It shows up under **Settings → Devices & services → Discovered**.
+3. Add it, then select it as the text-to-speech engine in **Settings → Voice assistants → Assist → [your pipeline]**.
 
 ## Configuration
 
@@ -18,25 +17,17 @@ option in **Settings → Voice assistants → Pipelines**.
 | `extra_pip_packages` | Space-separated pip packages to install at startup, for plugins not baked into the image |
 | `log_level` | `debug`, `info`, `warning`, or `error` |
 
-The default plugin (`ovos-tts-plugin-server`) uses OVOS's public hosted server and needs no
-configuration to try out.
+The default (`ovos-tts-plugin-server`, OVOS's public hosted server) needs no configuration to try.
 
-## Upstream bug workaround (TODO: remove once fixed upstream)
+## mycroft.conf as the source of truth
 
-`wyoming-ovos-tts` has a bug: its `TtsProgram(...)` call passes `version=__version__`, but the
-nested `TtsVoice(...)` call omits it entirely. Against `wyoming>=1.9` this crashes at startup
-with `TypeError: TtsVoice.__init__() missing 1 required positional argument: 'version'`. The
-`Dockerfile` patches the installed source in place to fix this until it's fixed upstream.
+This add-on shares `mycroft.conf` with the other OVOS add-ons (`ovos-core` in particular) via `/share`. If `tts.module` is already set there — e.g. by `ovos-core`'s own autoconfigure flow, or by `ha-ovos-integration`'s voice setup — that value wins over this add-on's own `plugin` option. The `plugin`/`plugin_config` options here only take effect the first time, when the shared file has nothing set yet.
 
-- Upstream PR: [OpenVoiceOS/wyoming-ovos-tts#11](https://github.com/OpenVoiceOS/wyoming-ovos-tts/pull/11)
-- **Once that PR is merged and a new PyPI release is cut**, remove the `RUN python3 -c "..."`
-  patch step from the `Dockerfile` and just install `wyoming-ovos-tts` directly again.
+## Included patch
+
+`wyoming-ovos-tts` (the underlying package) has an upstream bug that crashes on startup against `wyoming>=1.9` (`TypeError: TtsVoice.__init__() missing 1 required positional argument: 'version'`). The Dockerfile patches this in place. Fixed automatically once [OpenVoiceOS/wyoming-ovos-tts#11](https://github.com/OpenVoiceOS/wyoming-ovos-tts/pull/11) ships in a PyPI release — no action needed here either way.
 
 ## Known limitations
 
-- `plugin_config` is a single JSON text field, not a per-plugin form — you need to know the
-  plugin's own config keys.
-- Verified end-to-end on a real HAOS Supervisor as of v0.0.6: builds, starts cleanly, sends
-  discovery, appears under Settings → Devices & services → Discovered, and is selectable as a
-  TTS engine in an Assist pipeline once confirmed. Not yet verified that synthesized speech
-  actually plays correctly through a satellite/pipeline run.
+- `plugin_config` is a single JSON text field, not a per-plugin form — you need to know the plugin's own config keys.
+- Confirmed working end-to-end: builds, starts, discovered by HA, selectable in a pipeline. Actual synthesized speech during a live pipeline run hasn't been separately verified.

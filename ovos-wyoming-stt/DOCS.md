@@ -1,13 +1,12 @@
 # OVOS Wyoming STT
 
-🚧 **v0.0.x — untested, work in progress.** Version stays below 0.1.0 until this has actually
-run successfully on a real HAOS install.
+Exposes any OVOS speech-to-text plugin over the [Wyoming protocol](https://github.com/rhasspy/wyoming), so it appears as a regular STT option in Home Assistant's own Assist pipeline setup.
 
-## What it does
+## Setup
 
-Wraps [wyoming-ovos-stt](https://github.com/TigreGotico/wyoming-ovos-stt), exposing any OVOS
-STT plugin via the Wyoming protocol. Once installed, it should appear as a speech-to-text
-option in **Settings → Voice assistants → Pipelines**.
+1. Install and start the add-on.
+2. Home Assistant discovers it automatically. It shows up under **Settings → Devices & services → Discovered**.
+3. Add it, then select it as the speech-to-text engine in **Settings → Voice assistants → Assist → [your pipeline]**.
 
 ## Configuration
 
@@ -18,16 +17,14 @@ option in **Settings → Voice assistants → Pipelines**.
 | `extra_pip_packages` | Space-separated pip packages to install at startup, for plugins not baked into the image |
 | `log_level` | `debug`, `info`, `warning`, or `error` |
 
-The default plugin (`ovos-stt-plugin-server`) uses OVOS's public hosted server and needs no
-configuration to try out.
+The default (`ovos-stt-plugin-server`, OVOS's public hosted server) needs no configuration to try.
+
+## mycroft.conf as the source of truth
+
+Shares `mycroft.conf` with the other OVOS add-ons via `/share`. If `stt.module` is already set there (e.g. via `ovos-core`'s autoconfigure flow, or `ha-ovos-integration`'s voice setup), that value wins over this add-on's own `plugin` option. `plugin`/`plugin_config` here only take effect the first time, when the shared file has nothing set yet.
 
 ## Known limitations
 
-- `plugin_config` is a single JSON text field, not a per-plugin form — you need to know the
-  plugin's own config keys.
-- Heavier local STT plugins (e.g. Whisper models) may need more CPU/RAM than a default HAOS
-  install has to spare — not yet benchmarked.
-- Verified end-to-end on a real HAOS Supervisor: builds, starts cleanly with no errors in the
-  log, appears under Settings → Devices & services, and is selectable as an STT engine in an
-  Assist pipeline once confirmed. Not yet verified that transcription is actually accurate —
-  only that the plumbing works.
+- `plugin_config` is a single JSON text field, not a per-plugin form — you need to know the plugin's own config keys.
+- Heavier local STT plugins (e.g. Whisper models) may need more CPU/RAM than a default HAOS install has spare — not benchmarked.
+- Confirmed working end-to-end: builds, starts, discovered by HA, selectable in a pipeline. Transcription accuracy hasn't been separately benchmarked — only that the plumbing works.

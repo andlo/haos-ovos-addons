@@ -1,53 +1,38 @@
 # OVOS Skills Extra
 
-🚧 **v0.1.x — new.**
+The free, unverified counterpart to [OVOS Skills](../ovos-skills/DOCS.md). Same underlying mechanism — one isolated Python virtual environment per skill — but with no catalog and no verification: you type a PyPI package name or a git URL, and it gets installed exactly as given.
 
-## What it is
+**Use OVOS Skills (the curated one) when** you want the small set of skills this project has confirmed work correctly in this specific setup.
 
-The free, unverified counterpart to the [OVOS Skills](../ovos-skills/DOCS.md) add-on. Same
-underlying mechanism -- one isolated Python venv per skill, install/uninstall/settings via a
-small HTTP API -- but with no catalog and no verification at all.
+**Use this add-on when** you want a specific skill that isn't in the curated catalog — your own skill, an experimental one, or anything not checked yet. Nothing here is vetted for this architecture: some OVOS skills assume a full, standalone OVOS install with its own audio subsystem or continuous microphone listener, neither of which exists here, so a skill may load without error but not actually do anything useful. That's the tradeoff for the extra reach.
 
-**Use OVOS Skills (the curated one) when:** you want the small set of skills this project has
-actually confirmed make sense in this specific setup (a synchronous `/ask` bridge into
-`ovos-core`, no `ovos-audio`, no continuous microphone listener). Picking from a list, not
-typing anything.
+The split mirrors Debian's main/contrib, or Home Assistant's built-in integrations vs. HACS: one side stays trustworthy by construction, the other stays unrestricted.
 
-**Use OVOS Skills Extra (this one) when:** you want a specific skill that isn't in the curated
-catalog yet -- your own skill, an experimental one, or anything this project hasn't gotten
-around to checking. You type a PyPI package name or a git URL directly; nothing about it is
-vetted for this architecture. Some OVOS skills assume a full, standalone OVOS install with its
-own audio subsystem and continuous wake-word listener -- neither exists here, so a skill that
-depends on those (already confirmed for real: `ovos-skill-volume`, `ovos-skill-naptime`) may
-load without error but not actually do anything useful. That's the tradeoff for the extra
-reach; nothing here stops you from trying, but nothing here promises it'll work either.
+## Setup
 
-The split mirrors Debian's main/contrib, or Home Assistant's own built-in integrations vs.
-HACS: one side stays trustworthy by construction, the other stays unrestricted.
+Install and start the add-on. Add skills from Home Assistant, via `ha-ovos-integration`'s skill flow (choose "Extra" instead of the curated catalog) — or directly through this add-on's own API.
 
-## API
-
-Identical shape to OVOS Skills' own API, minus `GET /catalog` (there's nothing to browse --
-`POST /skills/install` takes a raw `{"url": "<pypi-name-or-git-url>"}` body directly).
+## API (port 8502)
 
 | Endpoint | What it does |
 |---|---|
 | `GET /health` | `{"bus_connected": true}` |
 | `GET /skills` | Installed skills, from this add-on's own manifest |
 | `GET /skills/running` | Per-skill process status |
-| `POST /skills/install` | Body `{"url": "<pypi-name-or-git-url>"}`. Async, same pattern as OVOS Skills |
+| `POST /skills/install` | Body `{"url": "<pypi-name-or-git-url>"}`. Async — returns `{"status": "pending", "poll": "..."}` |
 | `GET /skills/install/status?key=<url or skill_id>` | Poll for the real result |
-| `DELETE /skills/{skill_id}` | Remove the skill's own venv |
-| `GET /skills/{skill_id}/settingsmeta`, `GET`/`PUT /skills/{skill_id}/settings` | Same as OVOS Skills |
+| `DELETE /skills/{skill_id}` | Uninstall — removes the skill's own venv |
+| `GET /skills/{skill_id}/settingsmeta` | The skill's settings schema, if it ships one |
+| `GET`/`PUT /skills/{skill_id}/settings` | Read/write the skill's own `settings.json` |
 
-## Persistence, install mechanics, everything else
+## Configuration
 
-Identical to OVOS Skills -- see that add-on's own DOCS.md for the full architecture reasoning
-(why one venv per skill, why nothing is persisted except a small manifest, PyPI-vs-git
-handling, etc.). This add-on's own manifest lives at a separate path
-(`/share/ovos-skills-extra/manifest.json`) so the two add-ons never interfere with each other,
-even if both happen to install a skill with the same name.
+| Option | Description |
+|---|---|
+| `log_level` | `debug`, `info`, `warning`, or `error` |
 
-One deliberate difference: OVOS Skills prefers a real PyPI package over a git URL when one
-exists under the repo's own name (`_resolve_install_target`). This add-on does not -- whatever
-the person typed is installed exactly as given, not second-guessed.
+## Persistence
+
+Same model as OVOS Skills — only a small manifest persists, on its own path (`/share/ovos-skills-extra/manifest.json`, separate from OVOS Skills' own, so the two add-ons never interfere even if both install a skill with the same name). Each skill's venv is rebuilt fresh from that manifest on every container start. A shared, persistent pip cache (`/share/ovos-pip-cache`, shared with every other add-on) means the underlying packages usually don't need re-downloading.
+
+**One deliberate difference from OVOS Skills:** no PyPI-vs-git preference logic here — whatever source you type is installed exactly as given, never substituted.
