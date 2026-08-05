@@ -152,13 +152,18 @@ def _pip_installable(source: str) -> str:
 # baseline afterward if the skill's own package declares a real,
 # stricter requirement -- this is just a better default starting point
 # within that same isolated venv, not a shared, forced version.
-BASELINE_PACKAGES = ["ovos-workshop", "ovos-plugin-manager", "setuptools"]
+BASELINE_PACKAGES = ["ovos-workshop", "ovos-plugin-manager", "setuptools<=80.9.0"]
 # setuptools added after a third, same-class failure confirmed for
 # real: ovos_plugin_manager's own code does "import pkg_resources"
 # internally, which newer setuptools versions no longer bundle by
 # default in a fresh venv -- same "assumes a full, shared OVOS
 # environment already has this" pattern as the ovos-plugin-manager gap
-# itself.
+# itself. PINNED, not just added unpinned -- confirmed directly (wheel
+# inspection): setuptools 83.0.0 (latest) ships zero pkg_resources
+# files, 80.9.0 ships 19. An earlier, unpinned attempt installed
+# whatever was newest and still failed with the exact same error --
+# same version ceiling this project's own Dockerfiles already use for
+# the same reason.
 
 
 def _venv_pip_install_baseline(venv_dir: str) -> None:
