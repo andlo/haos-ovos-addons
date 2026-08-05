@@ -33,6 +33,22 @@ jq -n \
   '{name: $name, solvers: $solvers} * $conf' \
   > /persona.json
 
+# If skill-ovos-fallback-chatgpt is installed (via ovos-skills-extra --
+# not something this add-on installs itself, see DEVELOPER.md), point
+# its own settings.json at THIS persona server instead of the real
+# OpenAI API. Persona describing its own address here, rather than
+# some other add-on guessing it, keeps ownership in the right place.
+# The skill's own OpenAI-compatible solver requires a `key` value to be
+# present at all (raises if missing) but this server doesn't validate
+# it -- a dummy value satisfies the check without needing a real key.
+FALLBACK_SKILL_ID="skill-ovos-fallback-chatgpt.openvoiceos"
+FALLBACK_SETTINGS="/share/mycroft/skills/${FALLBACK_SKILL_ID}/settings.json"
+if [ -f "${FALLBACK_SETTINGS}" ]; then
+  bashio::log.info "Found ${FALLBACK_SKILL_ID}, pointing it at this persona server"
+  TMP_SETTINGS=$(mktemp)
+  jq '. + {"api_url": "http://b8e040e3-ovos-persona:8337/v1", "key": "not-needed-local-server"}'     "${FALLBACK_SETTINGS}" > "${TMP_SETTINGS}" && mv "${TMP_SETTINGS}" "${FALLBACK_SETTINGS}"
+fi
+
 # api.py's own lifespan handler launches ovos-persona-server itself
 # (subprocess.Popen, not exec) -- so it can also RESTART it whenever
 # ha-ovos-integration writes a new persona.json via PUT /settings,

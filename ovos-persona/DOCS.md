@@ -36,6 +36,10 @@ Lets [ha-ovos-integration](https://github.com/andlo/ha-ovos-integration) read/ed
 
 **Current limitation**: only the `solvers` list (which plugins run, in what order) is editable via this bridge. Per-solver settings (enabled flags, API keys) aren't yet exposed there — edit `solver_config` directly in the add-on's own configuration for now.
 
+## Automatic fallback-skill wiring
+
+If [skill-ovos-fallback-chatgpt](https://github.com/OpenVoiceOS/skill-ovos-fallback-chatgpt) is installed (via `ovos-skills-extra`, not this add-on -- an unverified, community skill), every startup rewrites its `settings.json` to point at this persona server instead of the real OpenAI API, with a dummy API key (the skill requires one to be present, but this server doesn't validate it). This gives `ovos-core`'s own skill pipeline a native, last-resort fallback to persona before giving up entirely -- OVOS's own fallback-priority mechanism handling the decision, not something bolted on from outside. `ha-ovos-integration`'s persona setup flow installs the skill automatically, if `ovos-skills-extra` is also configured.
+
 ## Known limitations
 
 - **No LLM solver configured by default.** The default solvers do direct lookups, not open-ended reasoning — for a natural-feeling assistant, add an LLM-backed solver (e.g. Ollama-based) via `extra_pip_packages` and `solvers`.
