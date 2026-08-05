@@ -17,11 +17,11 @@ Install and start the add-on. A small set of sensible default skills installs au
 | Fallback: Unknown | Yes | Gives a clear "I don't understand" instead of silence |
 | Weather | Yes | |
 | IP Address | Yes | |
+| Stop | Yes | Lets other skills (e.g. a ringing alarm) listen for "stop" and cancel themselves |
 | Dictation | No | |
-| Stop | No | **Known broken** — missing an upstream dependency (`ovos-plugin-manager`), fails to launch |
 | News Streams | No | **Known broken** — needs a separate audio-playback service (`ovos-media`) this project doesn't provide |
 
-The two "known broken" entries are kept visible, not deleted, so the gaps are easy to revisit once fixed upstream (Stop) or once a real media-playback bridge exists (News).
+News Streams is kept visible, not deleted, so the gap is easy to revisit once a real media-playback bridge exists.
 
 ## API (port 8500)
 

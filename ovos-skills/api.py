@@ -131,29 +131,18 @@ CURATED_CATALOG = [
         "default": True,
     },
     {
-        # NOT installable as-is, kept out of "default" -- confirmed for
-        # real, this session: ovos-skill-stop's own (and transitively
-        # ovos-workshop's own) declared dependencies are missing
-        # ovos-plugin-manager, even though ovos_workshop.skills.ovos
-        # imports from it directly (ModuleNotFoundError at launch,
-        # reproduced twice, once via git source and once via the
-        # correct, confirmed PyPI package -- same failure either way,
-        # ruling out a git-vs-PyPI cause). A genuine upstream packaging
-        # gap that venv-per-skill isolation surfaces rather than causes
-        # -- the old shared-site-packages design masked this exact
-        # class of bug, since ovos-plugin-manager would just happen to
-        # already be present from another skill or ovos-core itself.
-        # Still listed (not deleted) so the gap is visible and easy to
-        # revisit once fixed upstream, rather than silently forgotten.
+        # Was broken (ModuleNotFoundError: ovos-plugin-manager, an
+        # upstream ovos-workshop dependency-declaration gap -- see
+        # BASELINE_PACKAGES's own docstring), now fixed by pre-installing
+        # ovos-workshop + ovos-plugin-manager as a baseline in every
+        # fresh venv. Confirmed working on real hardware after that fix.
         "skill_id": "skill-ovos-stop.openvoiceos",
         "name": "Stop",
         "description": "Handles \"stop\" -- lets other skills (e.g. a ringing alarm) "
-                        "listen for it and cancel themselves. KNOWN BROKEN: fails to "
-                        "launch (missing ovos-plugin-manager dependency, confirmed "
-                        "upstream, not specific to this add-on) -- not usable yet.",
+                        "listen for it and cancel themselves.",
         "source": "https://github.com/OpenVoiceOS/skill-ovos-stop",
         "package_name": "ovos-skill-stop",
-        "default": False,
+        "default": True,
     },
     {
         "skill_id": "skill-ovos-dictation.openvoiceos",
