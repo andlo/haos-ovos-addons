@@ -277,6 +277,16 @@ BASELINE_PACKAGES = ["ovos-workshop", "ovos-plugin-manager", "setuptools<=80.9.0
 # whatever was newest and still failed with the exact same error --
 # same version ceiling this project's own Dockerfiles already use for
 # the same reason.
+#
+# Root cause reported upstream, not just worked around here:
+# ovos-plugin-manager's own pkg_resources fallback (used when the
+# external importlib_metadata backport isn't installed) is what
+# actually raises ModuleNotFoundError -- PR filed proposing stdlib
+# importlib.metadata instead (no fallback needed, their own
+# python_requires>=3.10 already covers it):
+# https://github.com/OpenVoiceOS/ovos-plugin-manager/pull/426
+# This pin stays regardless of that PR's outcome -- still needed for
+# any already-published ovos-plugin-manager release in the meantime.
 
 
 def _venv_pip_install_baseline(venv_dir: str) -> None:
