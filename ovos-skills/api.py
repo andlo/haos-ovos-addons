@@ -463,17 +463,16 @@ class InstallRequest(BaseModel):
     url: str
 
 
-@app.get("/debug/grep-source")
-def debug_grep_source(needle: str):
-    """TEMPORARY -- search every skill's own venv for the literal source
-    of a suspicious log string. See DEVELOPER.md.
-    """
+_debug_grep_result = {"status": "not started"}
+
+
+def _run_debug_grep(needle: str):
     results = []
     if os.path.isdir(VENV_ROOT):
         try:
             out = subprocess.run(
                 ["grep", "-rln", needle, VENV_ROOT],
-                capture_output=True, text=True, timeout=60,
+                capture_output=True, text=True, timeout=120,
             )
             if out.stdout:
                 results.append(out.stdout)
@@ -481,7 +480,24 @@ def debug_grep_source(needle: str):
                 results.append(f"stderr: {out.stderr}")
         except (subprocess.TimeoutExpired, OSError) as exc:
             results.append(f"error: {exc}")
-    return {"matches": results or ["no matches found in any skill venv"]}
+    _debug_grep_result["status"] = "complete"
+    _debug_grep_result["matches"] = results or ["no matches found in any skill venv"]
+
+
+@app.post("/debug/grep-source")
+def debug_grep_source_start(needle: str):
+    """TEMPORARY -- async, since a full grep across every skill's venv
+    can take longer than a typical client's own request timeout. Poll
+    GET /debug/grep-source for the result. See DEVELOPER.md.
+    """
+    _debug_grep_result["status"] = "pending"
+    threading.Thread(target=_run_debug_grep, args=(needle,), daemon=True).start()
+    return {"status": "pending"}
+
+
+@app.get("/debug/grep-source")
+def debug_grep_source_poll():
+    return _debug_grep_result
 
 
 @app.get("/health")
