@@ -30,11 +30,17 @@ FROM ghcr.io/home-assistant/base:latest
 # current dev already include the official fix under upstream's own
 # naming (_messages_to_agent, not ours) — keeping our patch alongside
 # would make its own safety assertion fail the build.
+# fastapi/uvicorn: our own thin HTTP bridge (api.py) that lets
+# ha-ovos-integration read/edit persona.json's solver list and restarts
+# ovos-persona-server for changes to take effect (it only reads its
+# config at startup, no live-reload) -- see api.py's module docstring.
 RUN apk add --no-cache python3 py3-pip jq git \
  && pip install --no-cache-dir --break-system-packages \
       "git+https://github.com/OpenVoiceOS/ovos-persona-server.git@5daafb675520398a888833443e4adecca7e97b58" \
-      ovos-ddg-solver-plugin ovos-solver-failure-plugin
+      ovos-ddg-solver-plugin ovos-solver-failure-plugin \
+      fastapi uvicorn
 
+COPY api.py /api.py
 COPY run.sh /
 RUN chmod a+x /run.sh
 CMD [ "/run.sh" ]

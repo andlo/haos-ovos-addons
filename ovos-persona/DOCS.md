@@ -19,6 +19,31 @@ pipeline — it replaces HA's built-in intent-matching for open-ended questions.
 | `extra_pip_packages` | Space-separated pip packages to install at startup, for solver plugins not baked into the image |
 | `log_level` | `debug`, `info`, `warning`, or `error` |
 
+## HTTP bridge (api.py), port 8338
+
+Added so [ha-ovos-integration](https://github.com/andlo/ha-ovos-integration) can read/edit the
+`solvers` list from HA's own UI, same pattern as ovos-core and ovos-skills. Deliberately its own,
+independent add-on API URL in that integration (not reused from ovos-skills' or ovos-core's) --
+a person can genuinely run persona without skills, skills without persona, or both.
+
+`ovos-persona-server` only reads `persona.json` once, at its own startup -- no live-reload -- so
+`PUT /settings` restarts the process (`subprocess.Popen`, not the old `exec` this add-on used
+before; an `exec`'d process can't be relaunched by anything downstream of it).
+
+| Endpoint | What it does |
+|---|---|
+| `GET /health` | `{"bus_connected": true/false}` -- true when the persona-server subprocess is alive |
+| `GET /available-solvers` | Every question-solver plugin actually installed, via `entry_points(group="opm.solver.question")` -- confirmed correct by reading `ovos-plugin-manager`'s own `find_question_solver_plugins()` source, not guessed |
+| `GET /settings` | The current `persona.json` content |
+| `PUT /settings` | Replace `persona.json`, restart `ovos-persona-server` |
+
+**Known limitation, first cut**: only the `solvers` list (which plugins run, in what order) is
+editable via this bridge. `persona.json` also carries per-solver sub-objects (e.g.
+`{"ovos-solver-bm25-freebase-plugin": {"enabled": false}}`) for solvers present but disabled, or
+needing their own API keys -- genuinely nested config, not the flat, primitive-valued shape the
+skills settings UI's inference mechanism (in ha-ovos-integration) was built for. Left for a
+follow-up.
+
 Default solvers: `ovos-solver-plugin-ddg` (DuckDuckGo Instant Answers) plus
 `ovos-solver-failure-plugin` (always says *something*, even if it's just "404" — see Known
 limitations). Neither needs configuration or an API key to try out.

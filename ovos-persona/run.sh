@@ -26,5 +26,10 @@ jq -n \
   '{name: $name, solvers: $solvers} * $conf' \
   > /persona.json
 
-bashio::log.info "Starting ovos-persona-server on :8337"
-exec ovos-persona-server --persona /persona.json
+# api.py's own lifespan handler launches ovos-persona-server itself
+# (subprocess.Popen, not exec) -- so it can also RESTART it whenever
+# ha-ovos-integration writes a new persona.json via PUT /settings,
+# something a plain `exec` here could never do (a replaced process
+# can't be relaunched by anything downstream of it).
+bashio::log.info "Starting ovos-persona-server on :8337, bridged via api.py on :8338"
+exec python3 /api.py
