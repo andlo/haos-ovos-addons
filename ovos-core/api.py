@@ -56,6 +56,28 @@ class AskRequest(BaseModel):
     lang: str = "en-us"
 
 
+@app.get("/debug/grep-source")
+def debug_grep_source(needle: str):
+    """TEMPORARY -- search this container's installed packages for the
+    literal source of a suspicious log string, to find out whether it's
+    genuine code output or something injected some other way. Removed
+    once the investigation is done, see DEVELOPER.md.
+    """
+    import site
+    results = []
+    for sp_dir in site.getsitepackages():
+        try:
+            out = subprocess.run(
+                ["grep", "-rn", needle, sp_dir],
+                capture_output=True, text=True, timeout=30,
+            )
+            if out.stdout:
+                results.append(out.stdout)
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            results.append(f"error searching {sp_dir}: {exc}")
+    return {"matches": results or ["no matches found in site-packages"]}
+
+
 @app.get("/health")
 def health():
     return {"bus_connected": bool(bus and bus.connected_event.is_set())}
