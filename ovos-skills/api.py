@@ -507,8 +507,20 @@ def _seed_default_skills_if_first_boot():
     for item in CURATED_CATALOG:
         if not item.get("default"):
             continue
-        LOG.info(f"First boot: installing default skill {item['name']} ({item['source']})")
-        result = _install_skill_into_venv(item["source"])
+        # item["package_name"], not item["source"] -- confirmed for
+        # real, this session: skill-ovos-stop's own git URL doesn't
+        # yield a matching PyPI name via URL-derivation
+        # (_repo_name_from_git_url gives "skill-ovos-stop", the real
+        # PyPI package is "ovos-skill-stop"), so it silently fell back
+        # to the git source and installed a dev-branch version missing
+        # a transitive dependency (ModuleNotFoundError:
+        # ovos_plugin_manager). This project's own curated catalog
+        # already has the CONFIRMED-correct PyPI name for every entry
+        # (verified via `pip show`/`pip index versions` while building
+        # this list) -- using it directly here is more reliable than
+        # re-deriving and re-checking a candidate from the URL.
+        LOG.info(f"First boot: installing default skill {item['name']} ({item['package_name']})")
+        result = _install_skill_into_venv(item["package_name"])
         if result is None:
             LOG.error(f"Failed to install default skill {item['name']} -- see errors above")
             continue
