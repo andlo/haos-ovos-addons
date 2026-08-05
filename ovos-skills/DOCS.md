@@ -2,6 +2,29 @@
 
 🚧 **v0.0.x — work in progress.**
 
+## Curated, not the official skills-store feed
+
+`GET /catalog` no longer proxies the official OVOS skills-store `skills.json`. It serves a
+small, hand-verified list (`CURATED_CATALOG` in `api.py`) instead -- only skills individually
+confirmed, by reading their own source, to make sense in this project's specific bridge
+architecture (a synchronous `/ask` call into `ovos-core`, no `ovos-audio`, no continuous
+microphone listener). Several skills that sound like obvious defaults turned out not to be:
+`ovos-skill-volume` and `ovos-skill-naptime` were both confirmed to depend on PHAL plugins
+(`mycroft.volume.set` and friends) that have nothing listening for them here -- they'd load
+without error and silently do nothing, which is worse than not offering them.
+
+A subset of the curated list (marked `"default": True`) installs automatically on this add-on's
+genuinely first-ever boot (a marker file, not "is the manifest empty" -- someone who later
+uninstalls a default skill on purpose won't have it silently reappear). The rest of the curated
+list stays opt-in via the catalog UI, same as before.
+
+**Anything not vetted yet -- or that never will be -- belongs in the separate
+[OVOS Skills Extra](../ovos-skills-extra/DOCS.md) add-on**, a free-text PyPI-name-or-git-URL
+install with no catalog and no verification at all. This split mirrors Debian's main/contrib,
+or HA's own built-in integrations vs. HACS: one side stays trustworthy by construction, the
+other stays unrestricted. The two add-ons share the exact same underlying mechanism
+(`api.py` in each is nearly identical) -- only the source of what's offered differs.
+
 ## Current architecture: one isolated Python venv per skill
 
 Rebuilt after a real, hardware-confirmed incident: installing `skill-ovos-wolfie` pulled in a
@@ -36,7 +59,7 @@ now the sole, always-fresh-off-disk source of truth for what's installed.
 | Endpoint | What it does |
 |---|---|
 | `GET /health` | `{"bus_connected": true}` — always true now; kept for API-shape compatibility, no messagebus connection exists to report on anymore |
-| `GET /catalog` | Proxies the official, curated `skills.json` feed |
+| `GET /catalog` | This add-on's own small, curated list (see "Curated, not the official skills-store feed" above) |
 | `GET /skills` | `{"skills": [{"skill_id", "package_name", "source", "version"}, ...]}` — straight from the manifest, version looked up live per-skill via that skill's own venv's pip |
 | `GET /skills/running` | Per-skill process status (running/dead, PID, restart count) |
 | `POST /skills/install` | Body `{"url": "https://github.com/..."}`. Async — returns `{"status": "pending", "poll": "..."}` immediately |

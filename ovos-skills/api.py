@@ -51,7 +51,6 @@ import time
 from contextlib import asynccontextmanager
 from typing import Any
 
-import requests
 from fastapi import Body, FastAPI, HTTPException
 from pydantic import BaseModel
 
@@ -66,9 +65,102 @@ VENV_ROOT = "/opt/skill-venvs"
 # every venv from scratch.
 MANIFEST_PATH = "/share/ovos-skills/manifest.json"
 
-CATALOG_URL = "https://openvoiceos.github.io/OVOS-skills-store/skills.json"
 INSTALL_TIMEOUT = 300  # venv create + pip install -- a slow git clone +
                         # dependency resolve is realistic, not a hang
+
+# A small, CURATED catalog -- not the official OVOS skills-store feed
+# anymore. Confirmed for real, this session: several "obviously core"
+# OVOS skills assume a full, standalone OVOS install with its own audio
+# subsystem and continuous wake-word listener, neither of which exists
+# in this project's architecture (a synchronous /ask bridge into
+# ovos-core). ovos-skill-volume and ovos-skill-naptime were both
+# confirmed, by reading their own source, to rely on PHAL plugins
+# ("mycroft.volume.set" etc.) this setup has nothing listening for --
+# they'd load without error but silently do nothing, which is worse
+# than not offering them at all. Every skill below was individually
+# checked the same way before being added. Anything not vetted yet
+# belongs in the separate ovos-skills-extra add-on instead (see its own
+# DOCS.md), not here -- this list stays trustworthy by only ever
+# growing through the same verification, never by convenience.
+#
+# "default" entries are installed automatically on this add-on's very
+# first-ever boot (see _seed_default_skills_if_first_boot) -- a small,
+# sensible baseline so there's something useful from the start, the
+# same idea ovos-installer's own default skill set follows. Everything
+# else here is opt-in via the catalog UI, same as before.
+CURATED_CATALOG = [
+    {
+        "skill_id": "skill-ovos-date-time.openvoiceos",
+        "name": "Date and Time",
+        "description": "Answers questions about the current date and time.",
+        "source": "https://github.com/OpenVoiceOS/skill-ovos-date-time",
+        "package_name": "ovos-skill-date-time",
+        "default": True,
+    },
+    {
+        "skill_id": "ovos-skill-alerts.openvoiceos",
+        "name": "Alerts",
+        "description": "Alarms, timers, and reminders.",
+        "source": "https://github.com/OpenVoiceOS/ovos-skill-alerts",
+        "package_name": "ovos-skill-alerts",
+        "default": True,
+    },
+    {
+        "skill_id": "ovos-skill-fallback-unknown.openvoiceos",
+        "name": "Fallback: Unknown",
+        "description": "Gives a clear \"I don't understand\" response when nothing else "
+                        "matches, instead of silence.",
+        "source": "https://github.com/OpenVoiceOS/ovos-skill-fallback-unknown",
+        "package_name": "ovos-skill-fallback-unknown",
+        "default": True,
+    },
+    {
+        "skill_id": "ovos-skill-weather.openvoiceos",
+        "name": "Weather",
+        "description": "Current conditions and forecasts.",
+        "source": "https://github.com/OpenVoiceOS/ovos-skill-weather",
+        "package_name": "ovos-skill-weather",
+        "default": True,
+    },
+    {
+        "skill_id": "ovos-skill-ip.openvoiceos",
+        "name": "IP Address",
+        "description": "Reads back this device's local IP address.",
+        "source": "https://github.com/OpenVoiceOS/ovos-skill-ip",
+        "package_name": "ovos-skill-ip",
+        "default": True,
+    },
+    {
+        "skill_id": "skill-ovos-stop.openvoiceos",
+        "name": "Stop",
+        "description": "Handles \"stop\" -- lets other skills (e.g. a ringing alarm) "
+                        "listen for it and cancel themselves.",
+        "source": "https://github.com/OpenVoiceOS/skill-ovos-stop",
+        "package_name": "ovos-skill-stop",
+        "default": True,
+    },
+    {
+        "skill_id": "skill-ovos-dictation.openvoiceos",
+        "name": "Dictation",
+        "description": "Free-form dictation mode.",
+        "source": "https://github.com/OpenVoiceOS/skill-ovos-dictation",
+        "package_name": "ovos-skill-dictation",
+        "default": False,
+    },
+    {
+        "skill_id": "skill-ovos-news.openvoiceos",
+        "name": "News Streams",
+        "description": "Plays news audio streams.",
+        "source": "https://github.com/OpenVoiceOS/skill-ovos-news",
+        "package_name": "ovos-skill-news",
+        "default": False,
+    },
+]
+
+# Marker file, NOT "is the manifest empty" -- deliberately survives a
+# person later uninstalling a default skill on purpose. Seeding only
+# ever happens once, on this add-on's genuinely first-ever boot.
+DEFAULTS_SEEDED_MARKER = "/share/ovos-skills/.defaults-seeded"
 
 jobs: dict[str, dict] = {}  # key: url (install) or skill_id (uninstall)
 
@@ -400,6 +492,35 @@ def _rebuild_all_venvs_from_manifest():
             shutil.rmtree(venv_dir, ignore_errors=True)
 
 
+def _seed_default_skills_if_first_boot():
+    """Install the small, curated default set (see CURATED_CATALOG) --
+    but only once, ever, on this add-on's genuinely first boot. Checks
+    a dedicated marker file, NOT whether the manifest happens to be
+    empty right now -- someone who deliberately uninstalled every
+    default skill later should not have them silently reappear on the
+    next restart. Runs before discover_and_launch_all() so newly-seeded
+    skills get launched in the same pass as everything else.
+    """
+    if os.path.isfile(DEFAULTS_SEEDED_MARKER):
+        return
+    manifest = _read_manifest()
+    for item in CURATED_CATALOG:
+        if not item.get("default"):
+            continue
+        LOG.info(f"First boot: installing default skill {item['name']} ({item['source']})")
+        result = _install_skill_into_venv(item["source"])
+        if result is None:
+            LOG.error(f"Failed to install default skill {item['name']} -- see errors above")
+            continue
+        manifest[result["skill_id"]] = {
+            "source": result["source"], "package_name": result["package_name"],
+        }
+    _write_manifest(manifest)
+    os.makedirs(os.path.dirname(DEFAULTS_SEEDED_MARKER), exist_ok=True)
+    with open(DEFAULTS_SEEDED_MARKER, "w") as f:
+        f.write("seeded\n")
+
+
 class SkillProcessManager:
     """One isolated venv per skill (see module docstring) -- launches
     <venv>/bin/ovos-skill-launcher <skill_id> per entry, not a shared,
@@ -516,6 +637,7 @@ skill_procs = SkillProcessManager()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _rebuild_all_venvs_from_manifest()
+    _seed_default_skills_if_first_boot()
     skill_procs.discover_and_launch_all()
     skill_procs.start_monitor()
     yield
@@ -548,15 +670,13 @@ def running_skills():
 
 @app.get("/catalog")
 def get_catalog():
-    """Proxy the official, curated skill catalog -- small enough to
-    drive a dropdown directly.
+    """This add-on's own small, curated catalog (see CURATED_CATALOG's
+    docstring) -- NOT a proxy of the official OVOS skills-store feed
+    anymore. Small enough to drive a dropdown directly, same response
+    shape as before ({"items": [...]})  so ha-ovos-integration's own
+    catalog-consuming code needs no changes.
     """
-    try:
-        resp = requests.get(CATALOG_URL, timeout=10)
-        resp.raise_for_status()
-        return resp.json()
-    except requests.RequestException as exc:
-        raise HTTPException(status_code=502, detail=f"Could not reach catalog: {exc}")
+    return {"items": CURATED_CATALOG}
 
 
 @app.get("/skills")
