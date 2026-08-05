@@ -500,6 +500,18 @@ def debug_grep_source_poll():
     return _debug_grep_result
 
 
+@app.get("/debug/read-file")
+def debug_read_file(path: str):
+    """TEMPORARY -- read a specific file for inspection. See DEVELOPER.md."""
+    if not path.startswith(VENV_ROOT):
+        raise HTTPException(status_code=400, detail="only paths under VENV_ROOT allowed")
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            return {"content": f.read()}
+    except OSError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
 @app.get("/health")
 def health():
     # No messagebus connection to report on anymore -- this add-on no
