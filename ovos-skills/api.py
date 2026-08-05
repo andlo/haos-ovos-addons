@@ -164,9 +164,29 @@ CURATED_CATALOG = [
         "default": False,
     },
     {
+        # NOT actually functional here -- confirmed for real, this
+        # session: like ovos-skill-volume/-naptime (PHAL-dependent),
+        # this skill has its own dependency this project's architecture
+        # doesn't provide, just a different one. NewsSkill extends
+        # OVOSCommonPlaybackSkill; play_media() emits
+        # "ovos.common_play.play" (confirmed by reading
+        # ovos_workshop.skills.common_play's own source), which needs a
+        # separate, running ovos-media service (OCP's actual audio
+        # backend) to pick up and stream real audio -- nothing in this
+        # project's stack does. Ran for hours on real hardware this
+        # session without ever actually confirmed to play audio -- it
+        # loads and responds without error, which is exactly the kind
+        # of silent, misleading non-functionality this catalog exists
+        # to screen out. Any other OCP-based media skill (local-media,
+        # somafm, pyradios, youtube-music, ...) would hit the identical
+        # wall. Revisit once/if a real media-playback bridge add-on
+        # exists (an ovos-media service that actually plays through, or
+        # hands off to, something -- e.g. an HA media_player entity).
         "skill_id": "skill-ovos-news.openvoiceos",
         "name": "News Streams",
-        "description": "Plays news audio streams.",
+        "description": "Plays news audio streams. KNOWN BROKEN: needs a running "
+                        "ovos-media service to actually play audio, which this "
+                        "project's architecture doesn't provide -- not usable yet.",
         "source": "https://github.com/OpenVoiceOS/skill-ovos-news",
         "package_name": "ovos-skill-news",
         "default": False,
