@@ -1,5 +1,5 @@
 name: "OVOS Skills"
-version: "0.3.1"
+version: "0.3.2"
 slug: "ovos_skills"
 description: "Install, remove, and manage OVOS skills via a small HTTP API"
 url: "https://github.com/andlo/haos-ovos-addons/tree/master/ovos-skills"
