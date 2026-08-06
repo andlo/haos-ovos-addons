@@ -57,6 +57,7 @@ RUN apk add --no-cache python3 py3-pip jq git curl \
  && curl -fsSL "https://raw.githubusercontent.com/OpenVoiceOS/ovos-releases/refs/heads/main/constraints-stable.txt" \
       -o /etc/ovos-constraints-stable.txt \
  && pip install --no-cache-dir --break-system-packages \
+      "setuptools<=80.9.0" \
       bitstruct "ovos-core[lgpl,plugins]" ovos-skill-boot-finished ovos-messagebus \
       fastapi uvicorn ovos-bus-client \
       -c /etc/ovos-constraints-stable.txt
