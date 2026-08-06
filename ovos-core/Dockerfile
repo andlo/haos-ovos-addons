@@ -25,12 +25,27 @@ FROM ghcr.io/home-assistant/base:latest
 #
 # Pinned via a build-time-frozen constraints file, not the live URL --
 # fetched once here and baked into the image, so a future edit to OVOS's
-# own constraints-alpha.txt upstream can't silently change what a rebuild
+# own constraints-stable.txt upstream can't silently change what a rebuild
 # installs. Still gives us OVOS's own coordinated version combination
 # (confirmed clean via `pip check`), just frozen rather than floating --
 # same reasoning as pinning ovos-persona-server to an exact commit rather
 # than chasing @dev (see ovos-persona/DOCS.md for what that cost us
 # before we learned this lesson).
+#
+# STABLE channel, not alpha -- deliberate switch. OVOS documents three
+# channels (stable/testing/alpha); alpha is explicitly "bleeding edge,
+# may break." Confirmed for real this session: a newer, still-alpha
+# ovos-utils (>=0.11.0a1) pulls in ovos-spec-tools, whose session
+# validator logs a warning on every session sync because
+# ovos-bus-client's own Session.serialize() always includes
+# "persona_id": null rather than omitting it when unset -- a genuine,
+# reproducible incompatibility between two official OVOS packages that
+# hasn't been reconciled yet. Real, if noisy, and a plausible contributor
+# to slow/failed responses under this stack. Stable channel sidesteps it
+# entirely for now, since that ovos-utils pairing isn't promoted there
+# yet. --pre dropped too -- no reason to allow prereleases once pinned
+# to the stable constraints file. Revisit alpha/testing as a deliberate,
+# separate build once this is confirmed stable, not as the default.
 #
 # fann-dev is in Alpine's "community" repo, not "main" -- confirmed via
 # pkgs.alpinelinux.org. Confirmed for real this time (not just reasoned):
@@ -39,12 +54,12 @@ FROM ghcr.io/home-assistant/base:latest
 # the active matcher.
 RUN apk add --no-cache python3 py3-pip jq git curl \
       build-base python3-dev swig fann-dev pkgconf \
- && curl -fsSL "https://raw.githubusercontent.com/OpenVoiceOS/ovos-releases/refs/heads/main/constraints-alpha.txt" \
-      -o /etc/ovos-constraints-alpha.txt \
- && pip install --no-cache-dir --break-system-packages --pre \
+ && curl -fsSL "https://raw.githubusercontent.com/OpenVoiceOS/ovos-releases/refs/heads/main/constraints-stable.txt" \
+      -o /etc/ovos-constraints-stable.txt \
+ && pip install --no-cache-dir --break-system-packages \
       bitstruct "ovos-core[lgpl,plugins]" ovos-skill-boot-finished ovos-messagebus \
       fastapi uvicorn ovos-bus-client \
-      -c /etc/ovos-constraints-alpha.txt
+      -c /etc/ovos-constraints-stable.txt
 
 COPY api.py /api.py
 COPY run.sh /

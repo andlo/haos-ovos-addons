@@ -90,7 +90,7 @@ mkdir -p /share/ovos-pip-cache
 if [ -n "${EXTRA_PIP}" ]; then
   bashio::log.info "Installing extra pip packages: ${EXTRA_PIP}"
   pip install --cache-dir=/share/ovos-pip-cache --break-system-packages ${EXTRA_PIP} \
-    -c /etc/ovos-constraints-alpha.txt
+    -c /etc/ovos-constraints-stable.txt
 fi
 
 bashio::log.info "Starting shared ovos-messagebus on b8e040e3-ovos-core:8181"
