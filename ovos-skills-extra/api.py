@@ -442,11 +442,60 @@ class SkillProcessManager:
 skill_procs = SkillProcessManager()
 
 
+def _broadcast_ready_signal() -> None:
+    """A just-launched skill's own _connect_to_core() (ovos_workshop)
+    asks ovos-core "are you ready?" once, right after connecting -- if
+    the answer is "no", it falls back to waiting passively for a
+    "mycroft.ready" bus event that may never come again, since it's a
+    one-time signal from ovos-core's own startup sequence. Confirmed
+    for real, this session: ovos-core's own SkillManager (the component
+    that answers that question) only ever tracks skills installed in
+    ITS OWN Python environment -- it has no way to know this add-on's
+    separate container/venv skills exist at all, so the answer can stay
+    "no" indefinitely for anything launched here, regardless of how
+    long ovos-core itself has been running.
+
+    Rather than trying to fix ovos-core's own internal readiness
+    tracking (a separate, more invasive change to a different add-on,
+    and the underlying reason it never learns about these skills is
+    architectural, not a simple bug), this add-on emits that same
+    "mycroft.ready" event itself, right after every launch. Harmless
+    even for skills that already loaded correctly -- ovos_workshop's
+    own load_skill() just reloads in that case -- and reliably unblocks
+    any skill sitting in the "waiting for ready event" state, regardless
+    of why ovos-core's own answer was "no".
+    """
+    try:
+        from ovos_bus_client import MessageBusClient
+        from ovos_bus_client.message import Message
+        bus = MessageBusClient()
+        bus.run_in_thread()
+        bus.connected_event.wait(timeout=10)
+        bus.emit(Message("mycroft.ready"))
+        bus.close()
+    except Exception as exc:
+        LOG.warning(f"Could not broadcast mycroft.ready: {exc}")
+
+
+def _broadcast_ready_after_delay(delay: float = 5.0) -> None:
+    """Runs in a background thread -- see _broadcast_ready_signal's own
+    docstring for why this exists. The delay gives just-launched skill
+    processes time to actually connect and register their own
+    "mycroft.ready" listener before this fires; broadcasting too early
+    is a harmless no-op for that skill rather than a correctness issue,
+    but this makes the common case work on the first try instead of
+    needing a second, later nudge.
+    """
+    time.sleep(delay)
+    _broadcast_ready_signal()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _rebuild_all_venvs_from_manifest()
     skill_procs.discover_and_launch_all()
     skill_procs.start_monitor()
+    threading.Thread(target=_broadcast_ready_after_delay, daemon=True).start()
     yield
 
 
@@ -493,6 +542,7 @@ def _run_install_job(job_key: str, source: str):
     _write_manifest(manifest)
 
     skill_procs.launch(result["skill_id"])
+    threading.Thread(target=_broadcast_ready_after_delay, daemon=True).start()
 
     jobs[job_key] = {"status": "complete", "skill_id": result["skill_id"]}
 

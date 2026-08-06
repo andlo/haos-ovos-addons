@@ -40,3 +40,7 @@ Same as OVOS Skills -- every fresh venv gets `ovos-workshop` and `ovos-plugin-ma
 Same model as OVOS Skills — only a small manifest persists, on its own path (`/share/ovos-skills-extra/manifest.json`, separate from OVOS Skills' own, so the two add-ons never interfere even if both install a skill with the same name). Each skill's venv is rebuilt fresh from that manifest on every container start. A shared, persistent pip cache (`/share/ovos-pip-cache`, shared with every other add-on) means the underlying packages usually don't need re-downloading.
 
 **One deliberate difference from OVOS Skills:** no PyPI-vs-git preference logic here — whatever source you type is installed exactly as given, never substituted.
+
+## The "mycroft.ready" nudge
+
+After launching any skill (fresh install or container restart), this add-on broadcasts a `mycroft.ready` bus message a few seconds later. Needed because `ovos-core`'s own readiness tracking only ever sees skills installed in its own environment -- it has no way to know skills running in this add-on's separate container exist at all, so a skill's own "is ovos-core ready?" check can answer "no" indefinitely otherwise, leaving it stuck waiting. Harmless for skills that already loaded correctly.

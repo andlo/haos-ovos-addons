@@ -9,7 +9,7 @@ FROM ghcr.io/home-assistant/base:latest
 RUN apk add --no-cache python3 py3-pip jq git build-base python3-dev \
  && pip install --no-cache-dir --break-system-packages \
       "setuptools<=80.9.0" \
-      virtualenv fastapi uvicorn requests
+      virtualenv fastapi uvicorn requests ovos-bus-client
 
 COPY api.py /api.py
 COPY run.sh /

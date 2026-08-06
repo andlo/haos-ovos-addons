@@ -1,5 +1,5 @@
 name: "OVOS Skills Extra"
-version: "0.0.4"
+version: "0.0.5"
 slug: "ovos_skills_extra"
 description: "Install ANY OVOS-compatible skill from PyPI or a git URL -- unverified, unrestricted, your own responsibility"
 url: "https://github.com/andlo/haos-ovos-addons/tree/master/ovos-skills-extra"

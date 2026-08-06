@@ -70,6 +70,10 @@ Only a small manifest (`skill_id → source, package_name`) persists, on `/share
 
 A skill's own settings (`settings.json`) are separate from its venv and always persist on `/share`, independent of any reinstall.
 
+## The "mycroft.ready" nudge
+
+After launching any skill (fresh install or container restart), this add-on broadcasts a `mycroft.ready` bus message a few seconds later. Needed because `ovos-core`'s own readiness tracking only ever sees skills installed in its own environment -- it has no way to know skills running in this add-on's separate container exist at all, so a skill's own "is ovos-core ready?" check can answer "no" indefinitely otherwise, leaving it stuck waiting. Harmless for skills that already loaded correctly.
+
 ## Known limitations
 
 - Reinstalling on every container rebuild/update needs network access at boot to restore previously-installed skills.
