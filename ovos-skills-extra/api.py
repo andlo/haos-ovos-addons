@@ -493,9 +493,12 @@ def _broadcast_ready_after_delay(delay: float = 5.0) -> None:
     runs on. Each broadcast is a harmless no-op for any skill that
     already loaded.
     """
-    for _ in range(6):  # ~60s of coverage total, generous for slow hardware
-        time.sleep(delay)
-        _broadcast_ready_signal()
+    # TEMPORARY: reduced to a single shot to test a hypothesis --
+    # repeated reload() calls (triggered by each broadcast) may be
+    # corrupting padacioso's own intent registration state, since /ask
+    # still times out even after skills report themselves ready.
+    time.sleep(delay)
+    _broadcast_ready_signal()
 
 
 @asynccontextmanager
