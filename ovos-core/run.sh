@@ -1,6 +1,13 @@
 #!/usr/bin/with-contenv bashio
 EXTRA_PIP=$(bashio::config 'extra_pip_packages')
 
+# OVOS_DEFAULT_LOG_LEVEL -- confirmed by reading ovos_utils/log.py directly:
+# this env var (not the add-on's own log_level option by itself) is what
+# ovos-core/ovos-messagebus's own Python logger respects. The `log_level`
+# option was declared in config.yaml and shown in the UI but never actually
+# wired anywhere in this script -- a real, silent no-op bug until now.
+export OVOS_DEFAULT_LOG_LEVEL=$(bashio::config 'log_level' | tr '[:lower:]' '[:upper:]')
+
 # Shared config, same convention as the other four add-ons.
 export XDG_CONFIG_HOME=/share
 CONF_DIR="/share/mycroft"
