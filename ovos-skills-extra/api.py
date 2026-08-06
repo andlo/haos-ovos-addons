@@ -479,15 +479,23 @@ def _broadcast_ready_signal() -> None:
 
 def _broadcast_ready_after_delay(delay: float = 5.0) -> None:
     """Runs in a background thread -- see _broadcast_ready_signal's own
-    docstring for why this exists. The delay gives just-launched skill
-    processes time to actually connect and register their own
-    "mycroft.ready" listener before this fires; broadcasting too early
-    is a harmless no-op for that skill rather than a correctness issue,
-    but this makes the common case work on the first try instead of
-    needing a second, later nudge.
+    docstring for why this exists.
+
+    REPEATS several times, not a single shot -- confirmed for real,
+    this session: with several skills launching at once on real (weak)
+    hardware, a single broadcast only reached whichever skill happened
+    to finish connecting and register its own "mycroft.ready" listener
+    first (one skill out of nine loaded; the rest were still mid-
+    connect when the one-shot signal fired and simply missed it,
+    exactly the same race the original problem was, just narrowed).
+    Repeating catches stragglers without needing to know in advance how
+    long any given skill takes to connect on whatever hardware this
+    runs on. Each broadcast is a harmless no-op for any skill that
+    already loaded.
     """
-    time.sleep(delay)
-    _broadcast_ready_signal()
+    for _ in range(6):  # ~60s of coverage total, generous for slow hardware
+        time.sleep(delay)
+        _broadcast_ready_signal()
 
 
 @asynccontextmanager
