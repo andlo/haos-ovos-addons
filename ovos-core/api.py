@@ -173,11 +173,18 @@ def _read_shared_config() -> dict:
 def _ask_sync(utterance: str, lang: str) -> dict | None:
     """The exact emit/wait pattern confirmed on real hardware: send
     recognizer_loop:utterance (same message ovos-say-to itself emits --
-    see ovos_bus_client.scripts.ovos_say_to), wait for ovos.utterance.speak
-    back (SpecMessage.SPEAK in ovos_workshop/skills/ovos.py -- NOT the
-    older classic "speak" message some tooling still expects). Confirmed
-    for real: "what time is it" in, a correct spoken time back out,
-    computed by a genuinely running ovos-skill-date-time.
+    see ovos_bus_client.scripts.ovos_say_to), wait for "speak" back.
+
+    Listens for the classic "speak" message, not "ovos.utterance.speak"
+    -- confirmed by reading ovos_workshop/skills/ovos.py's own speak()
+    directly, inside the actual running container: this stable-channel
+    ovos-workshop (3.4.0) emits `message.forward("speak", data)`. The
+    newer "ovos.utterance.speak"/SpecMessage.SPEAK convention this
+    endpoint originally waited for belongs to a much newer ovos-workshop
+    than what stable's coordinated version set installs -- real answers
+    were being computed the whole time (confirmed via `docker stats`
+    showing genuine CPU work, not a hang), just never delivered back
+    here, because nothing was listening for the message actually sent.
     """
     result: dict = {}
     done = threading.Event()
@@ -187,11 +194,11 @@ def _ask_sync(utterance: str, lang: str) -> dict | None:
         result["skill"] = message.data.get("meta", {}).get("skill")
         done.set()
 
-    bus.on("ovos.utterance.speak", on_speak)
+    bus.on("speak", on_speak)
     bus.emit(Message("recognizer_loop:utterance",
                       {"utterances": [utterance], "lang": lang}))
     ok = done.wait(timeout=ASK_TIMEOUT)
-    bus.remove("ovos.utterance.speak", on_speak)
+    bus.remove("speak", on_speak)
 
     return result if ok else None
 
