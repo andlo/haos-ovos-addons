@@ -17,12 +17,14 @@ Requests to `/ask` are serialized (one at a time, not matched by session) — co
 | Option | Description |
 |---|---|
 | `extra_pip_packages` | Space-separated pip packages to install at startup |
+| `log_level` | `debug` / `info` / `warning` / `error` |
+| `intent_matcher` | `padacioso` (default) or `padatious` — see "Intent pipeline" below |
 
 ## Intent pipeline
 
-Uses `ovos-padacioso-pipeline-plugin` instead of the default `ovos-padatious-pipeline-plugin` — a lightweight, pure-Python matcher instead of a compiled, trained one. On weaker hardware (a typical HAOS NUC/Pi), padatious can take 80-90+ seconds per utterance; padacioso answers in under a second, with simpler fuzzy-matching instead of a trained model. This is a real accuracy/speed trade-off, not a strict improvement — worth keeping in mind as more skills are added.
+`intent_matcher` picks between `ovos-padacioso-pipeline-plugin` (default) and `ovos-padatious-pipeline-plugin`: padacioso is a lightweight, pure-Python matcher; padatious is a compiled, trained one. On weaker hardware (a typical HAOS NUC/Pi), padatious can take 80-90+ seconds per utterance; padacioso answers in under a second, with simpler fuzzy-matching instead of a trained model. This is a real accuracy/speed trade-off, not a strict improvement — pick based on your own hardware's headroom. Switching installs/uninstalls `ovos-padatious` at startup, so the first restart after changing it takes longer than normal.
 
-The full pipeline order (in `run.sh`): stop → converse → OCP (media) → padacioso (intents) → adapt → model2vec → Common Query (general-knowledge questions, answered by any installed CommonQuerySkill, e.g. Wolfram Alpha) → fallback tiers, high to low.
+The pipeline order (in `run.sh`) differs slightly by choice, but both follow the same shape: stop → converse → OCP (media) → intent matcher (padacioso/padatious, high and medium tiers) → adapt → Common Query (general-knowledge questions, answered by any installed CommonQuerySkill, e.g. Wolfram Alpha) → fallback tiers, high to low.
 
 `ovos-persona-pipeline-plugin` stays disabled — this project's own persona bridge (the `ovos-persona` add-on) is a separate, deliberate mechanism, not this in-core one.
 

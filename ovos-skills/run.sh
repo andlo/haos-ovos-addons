@@ -1,5 +1,4 @@
 #!/usr/bin/with-contenv bashio
-ALLOW_PIP=$(bashio::config 'allow_pip')
 LOGLEVEL=$(bashio::config 'log_level')
 
 # Shared config, same convention as haos-ovos-addons. This add-on no
@@ -7,9 +6,10 @@ LOGLEVEL=$(bashio::config 'log_level')
 # api.py's module docstring -- confirmed unreliable for both install
 # and uninstall, replaced with a direct, per-skill-venv pip flow), so
 # the allow_pip/constraints keys SkillsStore itself used to read are no
-# longer relevant here. XDG_CONFIG_HOME=/share is kept regardless --
-# settings.json for every skill still lives there, unaffected by any
-# of this.
+# longer relevant here (allow_pip option itself removed from
+# config.yaml/schema in 0.0.30, having been dead since this rewrite).
+# XDG_CONFIG_HOME=/share is kept regardless -- settings.json for every
+# skill still lives there, unaffected by any of this.
 export XDG_CONFIG_HOME=/share
 CONF_DIR="/share/mycroft"
 CONF_FILE="${CONF_DIR}/mycroft.conf"
