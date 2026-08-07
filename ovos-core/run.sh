@@ -33,17 +33,38 @@ mkdir -p "${CONF_DIR}"
 jq '. + {websocket: ((.websocket // {}) + {host: "b8e040e3-ovos-core", port: 8181})}' \
   "${CONF_FILE}" > "${CONF_FILE}.tmp" && mv "${CONF_FILE}.tmp" "${CONF_FILE}"
 
-# padatious vs padacioso: RESOLVED with a real, confirmed root cause --
-# see Dockerfile for the full story. padatious segfaulted for real on
-# this hardware under genuine memory pressure (confirmed via `free -h` /
-# `dmesg`), not a CPU-speed or instruction-set issue. padacioso stays
-# the deliberate choice here, and disable_padacioso must be forced to
-# false -- confirmed by reading ovos_core/intent_services/__init__.py's
-# own __init__ directly: it defaults to True whenever padatious is
-# importable "to save memory". padatious is now uninstalled (see
-# Dockerfile), but leaving this explicit rather than relying on that to
-# keep working correctly if that ever changes again.
-jq '. + {intents: ((.intents // {}) + {disable_padacioso: false})}' \
+# Intent matcher choice, user-configurable -- see DOCS.md's "padatious
+# vs padacioso" for the full investigation this option is built from.
+# padatious is unconditionally instantiated (and trained in the
+# background) by ovos-core's own IntentService whenever the package is
+# merely importable, regardless of whether it's actually used in
+# intents.pipeline (confirmed by reading __init__.py directly) -- so
+# this has to control the actual INSTALL, not just which pipeline keys
+# are active, or picking padacioso here wouldn't actually avoid
+# padatious's memory cost.
+INTENT_MATCHER=$(bashio::config 'intent_matcher')
+mkdir -p /share/ovos-pip-cache
+if [ "${INTENT_MATCHER}" = "padatious" ]; then
+  bashio::log.info "Intent matcher: padatious (installing -- first restart after switching takes longer than normal)"
+  pip install --cache-dir=/share/ovos-pip-cache --break-system-packages ovos-padatious \
+    -c /etc/ovos-constraints-stable.txt
+  PIPELINE='["stop_high","converse","ocp_high","padatious_high","adapt_high","ocp_medium","fallback_high","stop_medium","adapt_medium","padatious_medium","adapt_low","common_qa","fallback_medium","fallback_low"]'
+else
+  bashio::log.info "Intent matcher: padacioso (uninstalling padatious if present)"
+  pip uninstall -y --break-system-packages ovos-padatious 2>/dev/null || true
+  PIPELINE='["stop_high","converse","padacioso_high","adapt_high","common_qa","fallback_high","ocp_high","stop_medium","padacioso_medium","adapt_medium","fallback_medium","ocp_medium","padacioso_low","fallback_low"]'
+fi
+
+# disable_padacioso forced to false always -- confirmed by reading
+# IntentService.__init__ directly: it defaults to True whenever
+# padatious is importable "to save memory". Harmless when padatious is
+# the active choice (padacioso just won't be in the pipeline list
+# above, so it never gets exercised even though it's technically
+# constructed), but required for padacioso to work at all when it's the
+# active choice -- so simplest to always set it explicitly rather than
+# branch on that too.
+jq --argjson pipeline "${PIPELINE}" \
+  '. + {intents: ((.intents // {}) + {disable_padacioso: false, pipeline: $pipeline})}' \
   "${CONF_FILE}" > "${CONF_FILE}.tmp" && mv "${CONF_FILE}.tmp" "${CONF_FILE}"
 
 # ovos-common-query-pipeline-plugin RE-ENABLED -- the original
@@ -66,40 +87,12 @@ jq '. + {intents: ((.intents // {}) + {disable_padacioso: false})}' \
 jq '. + {intents: ((.intents // {}) + {blacklisted_pipelines: ["ovos-persona-pipeline-plugin"]})}' \
   "${CONF_FILE}" > "${CONF_FILE}.tmp" && mv "${CONF_FILE}.tmp" "${CONF_FILE}"
 
-# padatious vs padacioso: RESOLVED, see Dockerfile/DOCS.md -- padatious
-# genuinely segfaults on this host under real memory pressure (confirmed
-# via free/dmesg), unrelated to CPU speed or instruction sets. padacioso
-# stays the deliberate choice, at every confidence tier padatious would
-# normally occupy. Known, tracked, separate open issue: padacioso's own
-# match time scales with the number of registered intents (measured this
-# session: 8s -> 22s -> 45s as more skills were tested) -- acceptable
-# now, worth revisiting before installing many more of the skill
-# catalog's entries.
-jq '. + {intents: ((.intents // {}) + {pipeline: [
-  "stop_high",
-  "converse",
-  "padacioso_high",
-  "adapt_high",
-  "common_qa",
-  "fallback_high",
-  "ocp_high",
-  "stop_medium",
-  "padacioso_medium",
-  "adapt_medium",
-  "fallback_medium",
-  "ocp_medium",
-  "padacioso_low",
-  "fallback_low"
-]})}' \
-  "${CONF_FILE}" > "${CONF_FILE}.tmp" && mv "${CONF_FILE}.tmp" "${CONF_FILE}"
-
 # Shared, content-addressed pip cache on /share -- safe across every
 # add-on and every venv (keyed by package+version+hash, never a
 # collision risk), unlike sharing an actual installation would be.
 # Persists across rebuilds (unlike the add-on's own container
 # filesystem), so a package already fetched by ANY add-on or any
 # skill's own venv doesn't need re-downloading/re-building here again.
-mkdir -p /share/ovos-pip-cache
 if [ -n "${EXTRA_PIP}" ]; then
   bashio::log.info "Installing extra pip packages: ${EXTRA_PIP}"
   pip install --cache-dir=/share/ovos-pip-cache --break-system-packages ${EXTRA_PIP} \

@@ -5,3 +5,20 @@ configuration:
   log_level:
     name: "Log level"
     description: "Verbosity of the add-on log"
+  intent_matcher:
+    name: "Intent matcher (advanced)"
+    description: >-
+      How spoken/typed requests get matched to a skill. 'padacioso'
+      (default, recommended) is lightweight and safe on shared or
+      resource-constrained hosts, but slows down as more skills are
+      installed. 'padatious' is OVOS's official default, more capable
+      and faster per-match once trained -- but its dependencies
+      (numpy/scipy/sklearn/fann2) are memory-heavy; on a host already
+      under memory pressure (many other add-ons, containers, or apps
+      running) it can crash this add-on outright rather than just being
+      slow. Pick padatious only if this host has real memory headroom
+      to spare (a good rule of thumb: several GB genuinely free, not
+      just technically available) -- if unsure, stay on padacioso.
+      Changing this reinstalls a real dependency on next restart, not
+      just a config toggle -- expect the first restart after switching
+      to take longer than normal.

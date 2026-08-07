@@ -66,7 +66,14 @@ FROM ghcr.io/home-assistant/base:latest
 # limited RAM -- padatious being memory-heavy makes it the one that
 # breaks first under that specific pressure, not evidence it's wrong on
 # weaker-but-dedicated hardware. padacioso stays the right choice HERE,
-# for a documented, verified reason instead of an assumed one.
+# for a documented, verified reason instead of an assumed one. Now
+# user-configurable (see config.yaml's intent_matcher option, run.sh) --
+# this build-time uninstall just sets the baked-in DEFAULT; run.sh
+# installs padatious back at runtime if a user explicitly opts into it,
+# since the choice needs to control the actual install, not just which
+# pipeline keys are active (padatious gets instantiated and trained
+# unconditionally whenever merely importable, confirmed by reading
+# __init__.py).
 RUN apk add --no-cache python3 py3-pip jq git curl \
       build-base python3-dev swig fann-dev pkgconf \
  && curl -fsSL "https://raw.githubusercontent.com/OpenVoiceOS/ovos-releases/refs/heads/main/constraints-stable.txt" \
