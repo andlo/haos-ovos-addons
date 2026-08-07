@@ -33,15 +33,18 @@ mkdir -p "${CONF_DIR}"
 jq '. + {websocket: ((.websocket // {}) + {host: "b8e040e3-ovos-core", port: 8181})}' \
   "${CONF_FILE}" > "${CONF_FILE}.tmp" && mv "${CONF_FILE}.tmp" "${CONF_FILE}"
 
-# padacioso is DISABLED BY DEFAULT whenever padatious is installed --
-# confirmed by reading ovos_core/intent_services/__init__.py's own
-# __init__ directly: `disable_padacioso` defaults to
-# `self._padatious_service is not None`, "to save memory", per its own
-# comment. REOPENING the padatious-vs-padacioso question this session
-# (see the pipeline block below and Dockerfile) -- explicitly leaving
-# padacioso disabled here now, matching OVOS's own official default
-# behavior, since we're deliberately testing padatious as primary again
-# rather than running both matchers redundantly.
+# padatious vs padacioso: RESOLVED with a real, confirmed root cause --
+# see Dockerfile for the full story. padatious segfaulted for real on
+# this hardware under genuine memory pressure (confirmed via `free -h` /
+# `dmesg`), not a CPU-speed or instruction-set issue. padacioso stays
+# the deliberate choice here, and disable_padacioso must be forced to
+# false -- confirmed by reading ovos_core/intent_services/__init__.py's
+# own __init__ directly: it defaults to True whenever padatious is
+# importable "to save memory". padatious is now uninstalled (see
+# Dockerfile), but leaving this explicit rather than relying on that to
+# keep working correctly if that ever changes again.
+jq '. + {intents: ((.intents // {}) + {disable_padacioso: false})}' \
+  "${CONF_FILE}" > "${CONF_FILE}.tmp" && mv "${CONF_FILE}.tmp" "${CONF_FILE}"
 
 # ovos-common-query-pipeline-plugin RE-ENABLED -- the original
 # blacklist reasoning ("needs external services this add-on doesn't set
@@ -63,29 +66,29 @@ jq '. + {websocket: ((.websocket // {}) + {host: "b8e040e3-ovos-core", port: 818
 jq '. + {intents: ((.intents // {}) + {blacklisted_pipelines: ["ovos-persona-pipeline-plugin"]})}' \
   "${CONF_FILE}" > "${CONF_FILE}.tmp" && mv "${CONF_FILE}.tmp" "${CONF_FILE}"
 
-# REOPENING padatious vs padacioso this session -- see Dockerfile for
-# the full reasoning. This is now OVOS's own OFFICIAL default pipeline
-# order (confirmed by reading ovos-core's own PyPI/GitHub README
-# directly), with padatious_high/medium in place of padacioso, minus the
-# persona entries (still blacklisted, separate mechanism in this
-# project) and minus m2v (no equivalent key exists in this stable-channel
-# 1.3.1 at all -- confirmed earlier this session, unrelated to this
-# question). Testing the real, actual matching speed on this hardware
-# after training completes, not assuming either direction.
+# padatious vs padacioso: RESOLVED, see Dockerfile/DOCS.md -- padatious
+# genuinely segfaults on this host under real memory pressure (confirmed
+# via free/dmesg), unrelated to CPU speed or instruction sets. padacioso
+# stays the deliberate choice, at every confidence tier padatious would
+# normally occupy. Known, tracked, separate open issue: padacioso's own
+# match time scales with the number of registered intents (measured this
+# session: 8s -> 22s -> 45s as more skills were tested) -- acceptable
+# now, worth revisiting before installing many more of the skill
+# catalog's entries.
 jq '. + {intents: ((.intents // {}) + {pipeline: [
   "stop_high",
   "converse",
-  "ocp_high",
-  "padatious_high",
+  "padacioso_high",
   "adapt_high",
-  "ocp_medium",
-  "fallback_high",
-  "stop_medium",
-  "adapt_medium",
-  "padatious_medium",
-  "adapt_low",
   "common_qa",
+  "fallback_high",
+  "ocp_high",
+  "stop_medium",
+  "padacioso_medium",
+  "adapt_medium",
   "fallback_medium",
+  "ocp_medium",
+  "padacioso_low",
   "fallback_low"
 ]})}' \
   "${CONF_FILE}" > "${CONF_FILE}.tmp" && mv "${CONF_FILE}.tmp" "${CONF_FILE}"

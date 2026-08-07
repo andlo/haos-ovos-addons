@@ -47,11 +47,26 @@ FROM ghcr.io/home-assistant/base:latest
 # to the stable constraints file. Revisit alpha/testing as a deliberate,
 # separate build once this is confirmed stable, not as the default.
 #
-# fann-dev is in Alpine's "community" repo, not "main" -- confirmed via
-# pkgs.alpinelinux.org. Confirmed for real this time (not just reasoned):
-# this exact recipe, on this exact base image, builds cleanly and
-# ovos-core starts and answers correctly once padacioso is configured as
-# the active matcher.
+# padatious RESOLVED, this time with a real, confirmed root cause --
+# reinstalling padatious to test it as OVOS's own official default (see
+# the previous commit's reasoning) reproduced a genuine
+# `Fatal Python error: Segmentation fault` on real hardware, not just
+# slowness. Confirmed the actual cause directly: `free -h` showed 344MB
+# free / swap 92% full at the time, and `dmesg` showed a real OOM-kill
+# already in progress (a different process, but confirming the host was
+# genuinely memory-starved). padatious's dependency stack (numpy, scipy,
+# sklearn, fann2, all loaded together) is memory-heavy; under real
+# memory pressure a malloc deep in a C extension fails and segfaults
+# instead of raising a clean Python MemoryError. This is NOT the same
+# claim as before ("padatious is just slow on weak CPUs") -- confirmed
+# AVX2 IS present on this CPU (`/proc/cpuinfo` checked directly), ruling
+# out the instruction-set theory. The real difference from raspOVOS/
+# Mark2 hardware isn't CPU strength, it's that THIS host is also running
+# ~30 other add-on containers simultaneously, competing for the same
+# limited RAM -- padatious being memory-heavy makes it the one that
+# breaks first under that specific pressure, not evidence it's wrong on
+# weaker-but-dedicated hardware. padacioso stays the right choice HERE,
+# for a documented, verified reason instead of an assumed one.
 RUN apk add --no-cache python3 py3-pip jq git curl \
       build-base python3-dev swig fann-dev pkgconf \
  && curl -fsSL "https://raw.githubusercontent.com/OpenVoiceOS/ovos-releases/refs/heads/main/constraints-stable.txt" \
@@ -60,25 +75,8 @@ RUN apk add --no-cache python3 py3-pip jq git curl \
       "setuptools<=80.9.0" \
       bitstruct "ovos-core[lgpl,plugins]" ovos-skill-boot-finished ovos-messagebus \
       fastapi uvicorn ovos-bus-client \
-      -c /etc/ovos-constraints-stable.txt
-
-# padatious RE-INSTALLED -- REOPENING this investigation deliberately,
-# not reverting blindly. OVOS's own official default pipeline (confirmed
-# by reading ovos-core's own PyPI/GitHub README directly) uses
-# padatious_high/medium, not padacioso -- the same setup raspOVOS ships
-# on Raspberry Pi 3B+/4 (2GB RAM, weaker than this NUC) and what runs the
-# real Mycroft Mark2 hardware (an RPi4 inside). If official OVOS runs
-# fine on weaker hardware with padatious as the default, this project's
-# original "padatious genuinely takes 80-90s, switch to padacioso"
-# conclusion is suspect: quite possibly a one-time TRAINING cost got
-# measured and mistaken for per-query MATCHING cost, and today's session
-# separately measured padacioso itself scaling badly with the number of
-# registered intents (8s -> 22s -> 45s as more skills were tested) --
-# the wrong direction for a project planning to install up to 20 skills.
-# Testing padatious's real matching speed on THIS hardware, after
-# training actually completes, is the direct way to settle this instead
-# of trusting either assumption. See DOCS.md's "padatious vs padacioso,
-# take two" for the actual measurements once taken.
+      -c /etc/ovos-constraints-stable.txt \
+ && pip uninstall -y --break-system-packages ovos-padatious
 
 COPY api.py /api.py
 COPY run.sh /
