@@ -60,7 +60,26 @@ RUN apk add --no-cache python3 py3-pip jq git curl \
       "setuptools<=80.9.0" \
       bitstruct "ovos-core[lgpl,plugins]" ovos-skill-boot-finished ovos-messagebus \
       fastapi uvicorn ovos-bus-client \
-      -c /etc/ovos-constraints-stable.txt
+      -c /etc/ovos-constraints-stable.txt \
+ && pip uninstall -y --break-system-packages ovos-padatious
+
+# padatious UNINSTALLED, not just left unused in intents.pipeline --
+# confirmed on real hardware this was needed, not just cosmetic:
+# ovos-core's own SkillManager runs "Requesting padatious intent
+# training" for every skill regardless of whether padatious is actually
+# in the active pipeline (it's unconditionally instantiated in
+# IntentService.__init__ whenever the package is importable), and on
+# this weak NUC that background training genuinely contends for CPU with
+# padacioso's own matching -- confirmed via `docker stats` showing
+# padacioso match times varying from ~8s to 22+s (sometimes past
+# api.py's own timeout) depending on whether training happened to be
+# running concurrently, plus real "dictionary changed size during
+# iteration" training-race errors in the logs, from a package we never
+# wanted matching anything in the first place. ovos-core's own
+# IntentService gracefully handles this via a plain try/except
+# ImportError around the padatious import (confirmed by reading
+# __init__.py directly) -- uninstalling it is the supported way to opt
+# out, not a workaround.
 
 COPY api.py /api.py
 COPY run.sh /

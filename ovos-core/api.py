@@ -20,10 +20,14 @@ from ovos_bus_client import MessageBusClient, Message
 
 LOG = logging.getLogger("ovos-core-api")
 
-ASK_TIMEOUT = 20  # padacioso (the active matcher -- see run.sh) answers
-                   # in under a second on real hardware; this is headroom
-                   # for a skill's own processing (e.g. an API call a
-                   # skill itself makes), not an expected wait.
+ASK_TIMEOUT = 35  # padacioso (the active matcher -- see run.sh) confirmed
+                   # on real hardware to take anywhere from ~8s to 22+s,
+                   # not the "under a second" originally assumed -- CPU
+                   # contention from padatious's own background training
+                   # was the real cause (now uninstalled entirely, see
+                   # Dockerfile), but keeping real headroom here too
+                   # rather than assuming that fully eliminates the
+                   # variance on this specific weak hardware.
 
 bus: MessageBusClient | None = None
 
