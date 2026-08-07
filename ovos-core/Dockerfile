@@ -60,26 +60,25 @@ RUN apk add --no-cache python3 py3-pip jq git curl \
       "setuptools<=80.9.0" \
       bitstruct "ovos-core[lgpl,plugins]" ovos-skill-boot-finished ovos-messagebus \
       fastapi uvicorn ovos-bus-client \
-      -c /etc/ovos-constraints-stable.txt \
- && pip uninstall -y --break-system-packages ovos-padatious
+      -c /etc/ovos-constraints-stable.txt
 
-# padatious UNINSTALLED, not just left unused in intents.pipeline --
-# confirmed on real hardware this was needed, not just cosmetic:
-# ovos-core's own SkillManager runs "Requesting padatious intent
-# training" for every skill regardless of whether padatious is actually
-# in the active pipeline (it's unconditionally instantiated in
-# IntentService.__init__ whenever the package is importable), and on
-# this weak NUC that background training genuinely contends for CPU with
-# padacioso's own matching -- confirmed via `docker stats` showing
-# padacioso match times varying from ~8s to 22+s (sometimes past
-# api.py's own timeout) depending on whether training happened to be
-# running concurrently, plus real "dictionary changed size during
-# iteration" training-race errors in the logs, from a package we never
-# wanted matching anything in the first place. ovos-core's own
-# IntentService gracefully handles this via a plain try/except
-# ImportError around the padatious import (confirmed by reading
-# __init__.py directly) -- uninstalling it is the supported way to opt
-# out, not a workaround.
+# padatious RE-INSTALLED -- REOPENING this investigation deliberately,
+# not reverting blindly. OVOS's own official default pipeline (confirmed
+# by reading ovos-core's own PyPI/GitHub README directly) uses
+# padatious_high/medium, not padacioso -- the same setup raspOVOS ships
+# on Raspberry Pi 3B+/4 (2GB RAM, weaker than this NUC) and what runs the
+# real Mycroft Mark2 hardware (an RPi4 inside). If official OVOS runs
+# fine on weaker hardware with padatious as the default, this project's
+# original "padatious genuinely takes 80-90s, switch to padacioso"
+# conclusion is suspect: quite possibly a one-time TRAINING cost got
+# measured and mistaken for per-query MATCHING cost, and today's session
+# separately measured padacioso itself scaling badly with the number of
+# registered intents (8s -> 22s -> 45s as more skills were tested) --
+# the wrong direction for a project planning to install up to 20 skills.
+# Testing padatious's real matching speed on THIS hardware, after
+# training actually completes, is the direct way to settle this instead
+# of trusting either assumption. See DOCS.md's "padatious vs padacioso,
+# take two" for the actual measurements once taken.
 
 COPY api.py /api.py
 COPY run.sh /

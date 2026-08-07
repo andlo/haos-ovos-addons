@@ -37,14 +37,11 @@ jq '. + {websocket: ((.websocket // {}) + {host: "b8e040e3-ovos-core", port: 818
 # confirmed by reading ovos_core/intent_services/__init__.py's own
 # __init__ directly: `disable_padacioso` defaults to
 # `self._padatious_service is not None`, "to save memory", per its own
-# comment. padatious IS installed here (a real dependency of
-# ovos-core[plugins]), so padacioso silently never got constructed at
-# all -- confirmed on real hardware: padacioso_high/medium/low were
-# rejected as "invalid pipeline components" too, right alongside the
-# earlier wrong long plugin-id names, for this different reason. Its own
-# LOG.debug hint names the exact fix: set this explicitly to false.
-jq '. + {intents: ((.intents // {}) + {disable_padacioso: false})}' \
-  "${CONF_FILE}" > "${CONF_FILE}.tmp" && mv "${CONF_FILE}.tmp" "${CONF_FILE}"
+# comment. REOPENING the padatious-vs-padacioso question this session
+# (see the pipeline block below and Dockerfile) -- explicitly leaving
+# padacioso disabled here now, matching OVOS's own official default
+# behavior, since we're deliberately testing padatious as primary again
+# rather than running both matchers redundantly.
 
 # ovos-common-query-pipeline-plugin RE-ENABLED -- the original
 # blacklist reasoning ("needs external services this add-on doesn't set
@@ -66,52 +63,29 @@ jq '. + {intents: ((.intents // {}) + {disable_padacioso: false})}' \
 jq '. + {intents: ((.intents // {}) + {blacklisted_pipelines: ["ovos-persona-pipeline-plugin"]})}' \
   "${CONF_FILE}" > "${CONF_FILE}.tmp" && mv "${CONF_FILE}.tmp" "${CONF_FILE}"
 
-# THE ACTUAL FIX for the real root cause (see DOCS.md's "The slow NUC"):
-# padatious (ovos-core's default intent matcher) is a C++/SWIG-compiled,
-# neural-network-trained matcher -- confirmed on this real NUC hardware
-# to take 80-90+ seconds for a single simple utterance match, vs.
-# near-instant on stronger hardware (sandbox, known-good VM). Nothing
-# was ever hanging; it was genuinely, unusably slow on this specific
-# weak hardware.
-#
-# Key format confirmed by reading the ACTUALLY-INSTALLED
-# ovos_core/intent_services/__init__.py directly inside the running
-# stable-channel container (1.3.1), not assumed from the newer dev
-# source -- this version predates the long "ovos-*-pipeline-plugin-*"
-# plugin-id naming entirely. Its get_pipeline() has a hardcoded
-# `matchers` dict keyed by short legacy names ("stop_high", "adapt_high",
-# "padacioso_high", "common_qa", "ocp_high", etc.) built from
-# unconditional imports (padacioso/adapt/ocp/commonqa are all plain
-# Python imports at the top of the file, not plugins selected by id).
-# The long plugin-id names this script used to send were therefore ALL
-# silently rejected as "invalid pipeline components" -- confirmed via
-# the add-on's own logs after the alpha->stable switch, `pip list`
-# inside the container, and finally reading this exact file's
-# `matchers` dict to get the real key set, in that order.
-#
-# m2v is DROPPED entirely, not renamed -- 1.3.1's matchers dict has no
-# m2v entry at all (no `ovos-m2v-*` key, no equivalent short name); it's
-# not present in this version's pipeline, period.
-#
-# padacioso is used at every confidence tier padatious would normally
-# occupy (padacioso_high/medium/low), same reasoning as before: a
-# lightweight pure-Python fuzzy matcher instead of the slow compiled
-# one, unconditionally available here (imported directly, not an
-# optional plugin) so no fallback-detection dance is needed.
+# REOPENING padatious vs padacioso this session -- see Dockerfile for
+# the full reasoning. This is now OVOS's own OFFICIAL default pipeline
+# order (confirmed by reading ovos-core's own PyPI/GitHub README
+# directly), with padatious_high/medium in place of padacioso, minus the
+# persona entries (still blacklisted, separate mechanism in this
+# project) and minus m2v (no equivalent key exists in this stable-channel
+# 1.3.1 at all -- confirmed earlier this session, unrelated to this
+# question). Testing the real, actual matching speed on this hardware
+# after training completes, not assuming either direction.
 jq '. + {intents: ((.intents // {}) + {pipeline: [
   "stop_high",
   "converse",
-  "padacioso_high",
-  "adapt_high",
-  "common_qa",
-  "fallback_high",
   "ocp_high",
-  "stop_medium",
-  "padacioso_medium",
-  "adapt_medium",
-  "fallback_medium",
+  "padatious_high",
+  "adapt_high",
   "ocp_medium",
-  "padacioso_low",
+  "fallback_high",
+  "stop_medium",
+  "adapt_medium",
+  "padatious_medium",
+  "adapt_low",
+  "common_qa",
+  "fallback_medium",
   "fallback_low"
 ]})}' \
   "${CONF_FILE}" > "${CONF_FILE}.tmp" && mv "${CONF_FILE}.tmp" "${CONF_FILE}"
