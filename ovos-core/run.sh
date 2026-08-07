@@ -33,6 +33,19 @@ mkdir -p "${CONF_DIR}"
 jq '. + {websocket: ((.websocket // {}) + {host: "b8e040e3-ovos-core", port: 8181})}' \
   "${CONF_FILE}" > "${CONF_FILE}.tmp" && mv "${CONF_FILE}.tmp" "${CONF_FILE}"
 
+# padacioso is DISABLED BY DEFAULT whenever padatious is installed --
+# confirmed by reading ovos_core/intent_services/__init__.py's own
+# __init__ directly: `disable_padacioso` defaults to
+# `self._padatious_service is not None`, "to save memory", per its own
+# comment. padatious IS installed here (a real dependency of
+# ovos-core[plugins]), so padacioso silently never got constructed at
+# all -- confirmed on real hardware: padacioso_high/medium/low were
+# rejected as "invalid pipeline components" too, right alongside the
+# earlier wrong long plugin-id names, for this different reason. Its own
+# LOG.debug hint names the exact fix: set this explicitly to false.
+jq '. + {intents: ((.intents // {}) + {disable_padacioso: false})}' \
+  "${CONF_FILE}" > "${CONF_FILE}.tmp" && mv "${CONF_FILE}.tmp" "${CONF_FILE}"
+
 # ovos-common-query-pipeline-plugin RE-ENABLED -- the original
 # blacklist reasoning ("needs external services this add-on doesn't set
 # up") turned out to be wrong for this one: confirmed by reading
