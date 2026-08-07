@@ -1,7 +1,4 @@
 configuration:
-  allow_pip:
-    name: "Allow pip installs"
-    description: "Gates SkillsStore itself — installs/removes are refused entirely if this is off"
   log_level:
     name: "Log level"
     description: "Verbosity of the add-on log"
