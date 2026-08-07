@@ -61,29 +61,45 @@ jq '. + {intents: ((.intents // {}) + {blacklisted_pipelines: ["ovos-persona-pip
 # was ever hanging; it was genuinely, unusably slow on this specific
 # weak hardware.
 #
-# padacioso is a lightweight, pure-Python drop-in replacement -- same
-# .intent file format, same registration bus messages
-# (padatious:register_intent etc., confirmed by reading its source
-# directly), simple fuzzy-matching instead of a trained model. Already
-# installed (a padacioso dependency of ovos-core[plugins] itself), but
-# NOT in ovos-config's own default `intents.pipeline` list -- only
-# padatious is there by default, so padacioso was never actually being
-# used despite being present. Explicitly override the pipeline list here
-# to use padacioso instead of padatious at every confidence tier.
+# Key format confirmed by reading the ACTUALLY-INSTALLED
+# ovos_core/intent_services/__init__.py directly inside the running
+# stable-channel container (1.3.1), not assumed from the newer dev
+# source -- this version predates the long "ovos-*-pipeline-plugin-*"
+# plugin-id naming entirely. Its get_pipeline() has a hardcoded
+# `matchers` dict keyed by short legacy names ("stop_high", "adapt_high",
+# "padacioso_high", "common_qa", "ocp_high", etc.) built from
+# unconditional imports (padacioso/adapt/ocp/commonqa are all plain
+# Python imports at the top of the file, not plugins selected by id).
+# The long plugin-id names this script used to send were therefore ALL
+# silently rejected as "invalid pipeline components" -- confirmed via
+# the add-on's own logs after the alpha->stable switch, `pip list`
+# inside the container, and finally reading this exact file's
+# `matchers` dict to get the real key set, in that order.
+#
+# m2v is DROPPED entirely, not renamed -- 1.3.1's matchers dict has no
+# m2v entry at all (no `ovos-m2v-*` key, no equivalent short name); it's
+# not present in this version's pipeline, period.
+#
+# padacioso is used at every confidence tier padatious would normally
+# occupy (padacioso_high/medium/low), same reasoning as before: a
+# lightweight pure-Python fuzzy matcher instead of the slow compiled
+# one, unconditionally available here (imported directly, not an
+# optional plugin) so no fallback-detection dance is needed.
 jq '. + {intents: ((.intents // {}) + {pipeline: [
-  "ovos-stop-pipeline-plugin-high",
-  "ovos-converse-pipeline-plugin",
-  "ovos-ocp-pipeline-plugin-high",
-  "ovos-padacioso-pipeline-plugin",
-  "ovos-adapt-pipeline-plugin-high",
-  "ovos-m2v-pipeline-high",
-  "ovos-ocp-pipeline-plugin-medium",
-  "ovos-common-query-pipeline-plugin",
-  "ovos-fallback-pipeline-plugin-high",
-  "ovos-stop-pipeline-plugin-medium",
-  "ovos-adapt-pipeline-plugin-medium",
-  "ovos-fallback-pipeline-plugin-medium",
-  "ovos-fallback-pipeline-plugin-low"
+  "stop_high",
+  "converse",
+  "padacioso_high",
+  "adapt_high",
+  "common_qa",
+  "fallback_high",
+  "ocp_high",
+  "stop_medium",
+  "padacioso_medium",
+  "adapt_medium",
+  "fallback_medium",
+  "ocp_medium",
+  "padacioso_low",
+  "fallback_low"
 ]})}' \
   "${CONF_FILE}" > "${CONF_FILE}.tmp" && mv "${CONF_FILE}.tmp" "${CONF_FILE}"
 
