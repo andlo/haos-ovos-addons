@@ -37,15 +37,15 @@
     "description": "Reads back this device's local IP address.",
     "source": "https://github.com/OpenVoiceOS/ovos-skill-ip",
     "package_name": "ovos-skill-ip",
-    "default": true
+    "default": false
   },
   {
     "skill_id": "skill-ovos-stop.openvoiceos",
     "name": "Stop",
-    "description": "Handles \"stop\" -- lets other skills (e.g. a ringing alarm) listen for it and cancel themselves.",
+    "description": "Handles \"stop\". KNOWN BROKEN: crash-loops on this stack (old alpha package, legacy 'mycroft'-namespace entry point -- confirmed via hardware logs, see ovos-core's own DEVELOPER.md/DOCS.md). Also appears to duplicate ovos-core's own built-in stop_high/stop_medium pipeline matchers, which already handle plain \"stop\" without any extra skill installed.",
     "source": "https://github.com/OpenVoiceOS/skill-ovos-stop",
     "package_name": "ovos-skill-stop",
-    "default": true
+    "default": false
   },
   {
     "skill_id": "skill-ovos-dictation.openvoiceos",
@@ -53,14 +53,6 @@
     "description": "Free-form dictation mode.",
     "source": "https://github.com/OpenVoiceOS/skill-ovos-dictation",
     "package_name": "ovos-skill-dictation",
-    "default": false
-  },
-  {
-    "skill_id": "skill-ovos-news.openvoiceos",
-    "name": "News Streams",
-    "description": "Plays news audio streams. KNOWN BROKEN: needs a running ovos-media service to actually play audio, which this project's architecture doesn't provide -- not usable yet.",
-    "source": "https://github.com/OpenVoiceOS/skill-ovos-news",
-    "package_name": "ovos-skill-news",
     "default": false
   },
   {
@@ -109,7 +101,7 @@
     "description": "Answers questions about the assistant's own history and origins (e.g. \"who made you\").",
     "source": "https://github.com/OpenVoiceOS/ovos-skill-personal",
     "package_name": "ovos-skill-personal",
-    "default": false
+    "default": true
   },
   {
     "skill_id": "ovos-skill-speedtest.openvoiceos",
@@ -125,7 +117,7 @@
     "description": "How-to instructions for nearly everything, via WikiHow.",
     "source": "https://github.com/OpenVoiceOS/ovos-skill-wikihow",
     "package_name": "ovos-skill-wikihow",
-    "default": false
+    "default": true
   },
   {
     "skill_id": "skill-ovos-ddg.openvoiceos",
@@ -133,7 +125,7 @@
     "description": "Answers factual questions using DuckDuckGo Instant Answers.",
     "source": "https://github.com/OpenVoiceOS/ovos-skill-ddg",
     "package_name": "ovos-skill-ddg",
-    "default": false
+    "default": true
   },
   {
     "skill_id": "ovos-skill-icanhazdadjokes.openvoiceos",
@@ -141,7 +133,7 @@
     "description": "Tells dad jokes on request.",
     "source": "https://github.com/OpenVoiceOS/ovos-skill-icanhazdadjokes",
     "package_name": "ovos-skill-icanhazdadjokes",
-    "default": false
+    "default": true
   },
   {
     "skill_id": "ovos-skill-parrot.openvoiceos",
@@ -165,6 +157,6 @@
     "description": "Answers general-knowledge questions via Wikipedia summaries.",
     "source": "https://github.com/OpenVoiceOS/ovos-skill-wikipedia",
     "package_name": "ovos-skill-wikipedia",
-    "default": false
+    "default": true
   }
 ]

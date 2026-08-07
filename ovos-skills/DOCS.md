@@ -18,25 +18,24 @@ Lives in `catalog.json`, not hardcoded in `api.py` — pure data (which skills, 
 | Alerts | Yes | Alarms, timers, reminders |
 | Fallback: Unknown | Yes | Gives a clear "I don't understand" instead of silence |
 | Weather | Yes | |
-| IP Address | Yes | |
-| Stop | Yes | Lets other skills (e.g. a ringing alarm) listen for "stop" and cancel themselves |
+| IP Address | No | |
+| Stop | No | **Known broken** — old alpha package, crash-loops on this stack (legacy `mycroft`-namespace entry point, `ModuleNotFoundError`). Also redundant: `ovos-core`'s own built-in `stop_high`/`stop_medium` pipeline matchers already handle plain "stop" without it. |
 | Dictation | No | |
-| News Streams | No | **Known broken** — needs a separate audio-playback service (`ovos-media`) this project doesn't provide |
 | Confucius Quotes | No | |
 | Days in History | No | |
 | ISS Location | No | |
 | MovieMaster | No | |
 | Number Facts | No | |
-| Personal | No | About the assistant itself |
+| Personal | Yes | About the assistant itself |
 | Speed Test | No | |
-| WikiHow | No | |
-| DuckDuckGo | No | Factual Q&A |
-| Dad Jokes | No | |
+| WikiHow | Yes | |
+| DuckDuckGo | Yes | Factual Q&A |
+| Dad Jokes | Yes | |
 | Parrot | No | Repeats back what you say |
 | Spelling | No | |
-| Wikipedia | No | |
+| Wikipedia | Yes | |
 
-News Streams is kept visible, not deleted, so the gap is easy to revisit once a real media-playback bridge exists.
+Stop is kept visible, not deleted, so the gap is easy to revisit if a working replacement package turns up. (News Streams, previously listed here for the same reason, was dropped from the catalog entirely — it needed a separate audio-playback service, `ovos-media`, this project's architecture doesn't provide, and revisiting that gap is a bigger, separate decision than a single skill.)
 
 ## API (port 8500)
 
