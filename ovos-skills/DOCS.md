@@ -53,6 +53,8 @@ Stop is kept visible, not deleted, so the gap is easy to revisit if a working re
 
 Installing prefers a real, published PyPI release over the catalog's git source when one exists — more stable than whatever's on a repo's default branch.
 
+Individual catalog entries can also declare an optional `extra_deps` list — packages installed into that specific skill's own venv only, on top of the shared baseline below. Used for `ovos-skill-wikipedia` (`ovos-translate-plugin-server`, confirmed 0.0.33, see issue #10) rather than adding it to every skill's venv unnecessarily.
+
 ## Configuration
 
 | Option | Description |

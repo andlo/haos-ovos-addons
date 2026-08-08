@@ -315,6 +315,49 @@ def _venv_pip_install_baseline(venv_dir: str) -> None:
     # exactly like before this existed -- not a new way to fail.
 
 
+def _extra_deps_for_source(source: str) -> list[str]:
+    """Per-skill extra dependencies, from catalog.json's own optional
+    "extra_deps" field -- for the rarer case where only ONE skill needs
+    an extra package, unlike BASELINE_PACKAGES (installed into every
+    venv regardless). Matched against catalog entries by package_name
+    OR source, since `source` here can be either depending on caller
+    (a bare package_name during default-seeding/reinstall, or a raw git
+    URL for a manually-installed skill not in the catalog at all --
+    that case simply matches nothing and returns []).
+
+    Added for ovos-skill-wikipedia: its own __init__ unconditionally
+    constructs a WikipediaSolver(translator=self.translator, ...), and
+    accessing self.translator raises when no translate plugin is
+    installed -- confirmed for real, this session: the raise happens
+    INSIDE __init__ before `self.wiki = ...` completes, so every query
+    afterward hits AttributeError: 'WikipediaSkill' object has no
+    attribute 'wiki'. Same "assumes a full, shared OVOS environment"
+    pattern as the BASELINE_PACKAGES gaps, but skill-specific enough
+    (only wikipedia needs a translator) that adding it to every venv
+    via BASELINE_PACKAGES would be unnecessary weight for the other
+    eight. See haos-ovos-addons issue #10.
+    """
+    for item in _read_catalog():
+        if source in (item.get("package_name"), item.get("source")):
+            return item.get("extra_deps", [])
+    return []
+
+
+def _venv_pip_install_extra_deps(venv_dir: str, source: str) -> None:
+    extra = _extra_deps_for_source(source)
+    if not extra:
+        return
+    pip_bin = os.path.join(venv_dir, "bin", "pip")
+    try:
+        subprocess.run(
+            [pip_bin, "install", "--no-input", "--cache-dir=/share/ovos-pip-cache", *extra],
+            capture_output=True, text=True, timeout=INSTALL_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        LOG.warning(f"Extra deps install timed out for {venv_dir} ({extra}) -- continuing anyway")
+    # Same deliberately-non-fatal reasoning as the baseline install.
+
+
 def _venv_pip_install(venv_dir: str, source: str) -> tuple[bool, str]:
     pip_bin = os.path.join(venv_dir, "bin", "pip")
     target = _pip_installable(source)
@@ -451,6 +494,7 @@ def _install_skill_into_venv(source: str) -> dict | None:
         return None
 
     _venv_pip_install_baseline(tmp_dir)
+    _venv_pip_install_extra_deps(tmp_dir, source)
 
     install_target = _resolve_install_target(os.path.join(tmp_dir, "bin", "pip"), source)
 
@@ -505,6 +549,7 @@ def _rebuild_all_venvs_from_manifest():
             LOG.error(f"Failed to rebuild venv for {skill_id}: {err}")
             continue
         _venv_pip_install_baseline(venv_dir)
+        _venv_pip_install_extra_deps(venv_dir, entry.get("package_name", entry["source"]))
         ok, err = _venv_pip_install(venv_dir, entry["source"])
         if not ok:
             LOG.error(f"Failed to reinstall {skill_id} into its venv: {err}")

@@ -157,6 +157,7 @@
     "description": "Answers general-knowledge questions via Wikipedia summaries.",
     "source": "https://github.com/OpenVoiceOS/ovos-skill-wikipedia",
     "package_name": "ovos-skill-wikipedia",
-    "default": true
+    "default": true,
+    "extra_deps": ["ovos-translate-plugin-server"]
   }
 ]
