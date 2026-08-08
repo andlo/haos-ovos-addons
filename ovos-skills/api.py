@@ -265,7 +265,8 @@ def _resolve_install_target(pip_bin: str, source: str) -> str:
 # baseline afterward if the skill's own package declares a real,
 # stricter requirement -- this is just a better default starting point
 # within that same isolated venv, not a shared, forced version.
-BASELINE_PACKAGES = ["ovos-workshop", "ovos-plugin-manager", "setuptools<=80.9.0"]
+BASELINE_PACKAGES = ["ovos-workshop", "ovos-plugin-manager", "setuptools<=80.9.0",
+                      "ovos-rake-keyword-extractor"]
 # setuptools added after a third, same-class failure confirmed for
 # real: ovos_plugin_manager's own code does "import pkg_resources"
 # internally, which newer setuptools versions no longer bundle by
@@ -287,6 +288,17 @@ BASELINE_PACKAGES = ["ovos-workshop", "ovos-plugin-manager", "setuptools<=80.9.0
 # https://github.com/OpenVoiceOS/ovos-plugin-manager/pull/426
 # This pin stays regardless of that PR's outcome -- still needed for
 # any already-published ovos-plugin-manager release in the meantime.
+#
+# ovos-rake-keyword-extractor added after a fourth, same-class failure
+# confirmed for real during 0.1.0 integration testing: ovos-skill-ddg
+# and ovos-skill-wikihow both silently answer nothing to every query,
+# each logging "Could not find the plugin
+# PluginTypes.KEYWORD_EXTRACTION.ovos-rake-keyword-extractor" -- both
+# assume this plugin is already present in a full, shared OVOS
+# environment (same pattern as the ovos-plugin-manager gap above), and
+# neither declares it as a real dependency of their own. Same fix
+# shape: added here once, benefits every skill's venv, not just these
+# two. See haos-ovos-addons issue #9.
 
 
 def _venv_pip_install_baseline(venv_dir: str) -> None:

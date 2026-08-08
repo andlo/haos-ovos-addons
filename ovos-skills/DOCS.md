@@ -61,7 +61,7 @@ Installing prefers a real, published PyPI release over the catalog's git source 
 
 ## Baseline packages
 
-Every fresh venv gets `ovos-workshop` and `ovos-plugin-manager` installed first, before the skill's own package. Several OVOS skills (and even `ovos-workshop` itself, in some versions) don't declare their own real runtime dependencies correctly, assuming a full, shared OVOS environment is already present -- this baseline covers that gap without reintroducing any cross-skill conflict risk, since it's still per-venv and gets upgraded/downgraded automatically if a skill's own package requires a different version.
+Every fresh venv gets `ovos-workshop`, `ovos-plugin-manager`, `setuptools<=80.9.0`, and `ovos-rake-keyword-extractor` installed first, before the skill's own package. Several OVOS skills (and even `ovos-workshop` itself, in some versions) don't declare their own real runtime dependencies correctly, assuming a full, shared OVOS environment is already present -- this baseline covers that gap without reintroducing any cross-skill conflict risk, since it's still per-venv and gets upgraded/downgraded automatically if a skill's own package requires a different version. `ovos-rake-keyword-extractor` specifically fixes `ovos-skill-ddg` and `ovos-skill-wikihow`, which both silently return no answer to every query without it (confirmed 0.0.32, see issue #9).
 
 ## Persistence
 
