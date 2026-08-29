@@ -35,8 +35,19 @@ Talks to ovos-core's own SkillsStore (ovos_core.skill_installer) for
 NOTHING anymore -- confirmed unreliable for install (the "error in pip
 subprocess" job-status false negatives) same as it already was for
 uninstall (see the old _direct_pip_uninstall's docstring, now removed
-along with the messagebus dependency itself). This file no longer
-connects to the messagebus at all.
+along with the messagebus dependency itself).
+
+Bus connectivity was fully removed at that point -- reversed, deliberately
+and narrowly, for ONE feature: enabling/disabling a skill without
+uninstalling it (skillmanager.activate/deactivate -- see
+_set_skill_active's own docstring for why this needs the bus at all,
+and why the old, entirely bus-free design couldn't offer it). Every
+other endpoint in this file is unaffected and stays exactly as
+bus-free as before; this is a short-lived, throwaway connection per
+call (the same connect/send/close shape _broadcast_ready_signal
+already used successfully elsewhere in this file), not a persistent
+connection reintroducing whatever reliability concerns the original
+removal was about.
 """
 from __future__ import annotations
 
@@ -64,6 +75,16 @@ VENV_ROOT = "/opt/skill-venvs"
 # package_name}. Small, human-readable, and enough to fully reconstruct
 # every venv from scratch.
 MANIFEST_PATH = "/share/ovos-skills/manifest.json"
+
+# Persists the DESIRED active/inactive state per skill_id across
+# restarts -- confirmed necessary by reading ovos_workshop's own
+# skill_launcher.py directly: each skill's own SkillLoader instance
+# (one per subprocess, launched fresh by SkillProcessManager.launch()
+# below on every container start) initializes self.active = True
+# unconditionally in its own __init__, with no persistence of its own.
+# Without this file, a skill someone deactivated would silently come
+# back active on the next restart/rebuild.
+ACTIVE_STATE_PATH = "/share/ovos-skills/active_state.json"
 
 INSTALL_TIMEOUT = 300  # venv create + pip install -- a slow git clone +
                         # dependency resolve is realistic, not a hang
@@ -130,6 +151,106 @@ def _write_manifest(manifest: dict) -> None:
     with open(tmp, "w") as f:
         json.dump(manifest, f, indent=2)
     os.replace(tmp, MANIFEST_PATH)  # atomic
+
+
+def _read_active_state() -> dict:
+    """{skill_id: bool}. A skill_id absent here means active (the
+    default) -- only ever written when someone explicitly deactivates
+    a skill, so the file stays empty/small on a normal system where
+    nothing's been turned off.
+    """
+    if not os.path.isfile(ACTIVE_STATE_PATH):
+        return {}
+    try:
+        with open(ACTIVE_STATE_PATH) as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _write_active_state(state: dict) -> None:
+    os.makedirs(os.path.dirname(ACTIVE_STATE_PATH), exist_ok=True)
+    tmp = ACTIVE_STATE_PATH + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(state, f, indent=2)
+    os.replace(tmp, ACTIVE_STATE_PATH)
+
+
+def _is_skill_active(skill_id: str) -> bool:
+    return _read_active_state().get(skill_id, True)
+
+
+def _send_activate_message(skill_id: str, active: bool) -> None:
+    """skillmanager.activate/deactivate, sent directly on the shared
+    bus -- confirmed by reading ovos_workshop's own skill_launcher.py
+    directly: EACH skill's own SkillLoader instance (one per
+    subprocess, since this project launches one isolated venv/process
+    per skill -- see SkillProcessManager below) registers its OWN bus
+    listener for these exact message types, filtered by
+    message.data['skill'] == self.skill_id, entirely independent of
+    ovos-core's own SkillManager (which has no visibility into these
+    subprocess-launched skills at all -- see _broadcast_ready_signal's
+    own docstring for the same, already-established limitation). This
+    is what makes it safe to send this directly rather than needing
+    ovos-core to be involved: the RIGHT skill's own process reacts to
+    it, and no other skill's process does (confirmed: do_load/do_unload
+    both check the skill id before doing anything).
+
+    Short-lived connect/send/close, same shape as
+    _broadcast_ready_signal -- not a persistent bus connection.
+    """
+    try:
+        from ovos_bus_client import MessageBusClient
+        from ovos_bus_client.message import Message
+        bus = MessageBusClient()
+        bus.run_in_thread()
+        bus.connected_event.wait(timeout=10)
+        msg_type = "skillmanager.activate" if active else "skillmanager.deactivate"
+        bus.emit(Message(msg_type, data={"skill": skill_id}))
+    except Exception as exc:
+        LOG.warning(f"Could not send {('activate' if active else 'deactivate')} for {skill_id}: {exc}")
+        return
+    # Separate try/except: confirmed for real that bus.close() itself
+    # can raise ('NoneType' object has no attribute 'close_frame',
+    # from ovos_bus_client's own underlying websocket-client library)
+    # AFTER the emit above already succeeded and the target skill's
+    # own process already reacted correctly (confirmed via its own
+    # log: "reloading skill" / "loaded successfully") -- a cleanup-
+    # only failure, not a sign the message itself didn't go through.
+    # Logging it under the same "Could not send" message as an actual
+    # send failure would be actively misleading.
+    try:
+        bus.close()
+    except Exception as exc:
+        LOG.debug(f"Non-fatal: bus.close() raised after a successful {msg_type} for {skill_id}: {exc}")
+
+
+def _set_skill_active(skill_id: str, active: bool) -> None:
+    state = _read_active_state()
+    if active:
+        state.pop(skill_id, None)  # absent == active, keep the file minimal
+    else:
+        state[skill_id] = False
+    _write_active_state(state)
+    _send_activate_message(skill_id, active)
+
+
+def _reapply_active_state_after_delay(skill_id: str, delay: float = 5.0) -> None:
+    """Runs in a background thread right after a skill is launched --
+    a freshly launched skill's own SkillLoader always starts with
+    self.active = True (see ACTIVE_STATE_PATH's own comment for why),
+    so a previously-deactivated skill needs deactivating again after
+    each restart. The delay gives the skill's own _connect_to_core()
+    time to actually register its skillmanager.deactivate listener
+    before this fires -- same reasoning and same delay as
+    _broadcast_ready_after_delay elsewhere in this file. A no-op for
+    any skill that was never deactivated (the common case).
+    """
+    if _is_skill_active(skill_id):
+        return
+    time.sleep(delay)
+    LOG.info(f"Re-applying deactivated state for {skill_id} after (re)launch")
+    _send_activate_message(skill_id, False)
 
 
 def _venv_dir(skill_id: str) -> str:
@@ -649,6 +770,14 @@ class SkillProcessManager:
             proc = subprocess.Popen([launcher, skill_id])
             self._procs[skill_id] = proc
         LOG.info(f"Launched skill process for {skill_id} (pid {proc.pid})")
+        # Re-apply a previously-deactivated state -- see
+        # _reapply_active_state_after_delay's own docstring for why a
+        # freshly launched skill needs this every single time, not
+        # just once. No-op (returns immediately) for the common case
+        # of a skill that's never been deactivated.
+        threading.Thread(
+            target=_reapply_active_state_after_delay, args=(skill_id,), daemon=True,
+        ).start()
 
     def stop(self, skill_id: str):
         with self._lock:
@@ -854,6 +983,7 @@ def list_installed_skills():
             "package_name": entry["package_name"],
             "source": entry["source"],
             "version": version,
+            "active": _is_skill_active(skill_id),
         })
     return {"skills": skills}
 
@@ -929,6 +1059,34 @@ def _settings_path(skill_id: str) -> str:
     # skill's own code/venv lives. Already on /share via XDG_CONFIG_HOME.
     base = os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config"))
     return os.path.join(base, "mycroft", "skills", skill_id, "settings.json")
+
+
+@app.get("/skills/{skill_id}/active")
+def get_skill_active(skill_id: str):
+    """Whether this skill is currently active (the default) or has
+    been deactivated via PUT below -- from the persisted state file,
+    not a live bus query (see ACTIVE_STATE_PATH's own comment: no bus
+    message exists to ask a running skill process its own state, so
+    this file IS the source of truth, kept in sync by always going
+    through _set_skill_active for every change).
+    """
+    manifest = _read_manifest()
+    if skill_id not in manifest:
+        raise HTTPException(status_code=404, detail=f"No installed skill '{skill_id}'")
+    return {"active": _is_skill_active(skill_id)}
+
+
+class ActiveRequest(BaseModel):
+    active: bool
+
+
+@app.put("/skills/{skill_id}/active")
+def put_skill_active(skill_id: str, req: ActiveRequest):
+    manifest = _read_manifest()
+    if skill_id not in manifest:
+        raise HTTPException(status_code=404, detail=f"No installed skill '{skill_id}'")
+    _set_skill_active(skill_id, req.active)
+    return {"status": "ok", "active": req.active}
 
 
 @app.get("/skills/{skill_id}/settingsmeta")

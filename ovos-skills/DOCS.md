@@ -43,13 +43,22 @@ Stop is kept visible, not deleted, so the gap is easy to revisit if a working re
 |---|---|
 | `GET /health` | `{"bus_connected": true}` |
 | `GET /catalog` | This add-on's own curated skill list, as `{"items": [...]}` |
-| `GET /skills` | Installed skills: `{"skills": [{"skill_id", "package_name", "source", "version"}, ...]}` |
+| `GET /skills` | Installed skills: `{"skills": [{"skill_id", "package_name", "source", "version", "active"}, ...]}` |
 | `GET /skills/running` | Per-skill process status (running/dead, PID, restart count) |
 | `POST /skills/install` | Body `{"url": "<source>"}`. Async — returns `{"status": "pending", "poll": "..."}` |
 | `GET /skills/install/status?key=<url or skill_id>` | Poll for the real result; success includes the confirmed-real `skill_id` |
 | `DELETE /skills/{skill_id}` | Uninstall — removes the skill's own venv |
+| `GET`/`PUT /skills/{skill_id}/active` | Enable/disable a skill without uninstalling it. `PUT` body `{"active": true/false}` — see "Enabling/disabling a skill" below |
 | `GET /skills/{skill_id}/settingsmeta` | The skill's settings schema, if it ships one |
 | `GET`/`PUT /skills/{skill_id}/settings` | Read/write the skill's own `settings.json` |
+
+## Enabling/disabling a skill
+
+`PUT /skills/{skill_id}/active` sends `skillmanager.activate`/`skillmanager.deactivate` directly on the shared bus, confirmed by reading `ovos_workshop`'s own `skill_launcher.py` directly: each skill's own `SkillLoader` (one per subprocess -- this add-on launches one isolated venv/process per skill) registers its own bus listener for these exact messages, filtered by `message.data['skill'] == self.skill_id` -- entirely independent of `ovos-core`'s own `SkillManager`, which has no visibility into these subprocess-launched skills at all (see "The mycroft.ready nudge" below for the same, already-established limitation). This is what makes it safe to send directly: the right skill's own process reacts, no other skill's process does.
+
+The desired state is persisted to `/share/ovos-skills/active_state.json` (absent = active, the default) and re-applied a few seconds after every (re)launch, since a freshly launched skill's own `SkillLoader` always starts `active = True` with no memory of a previous deactivation. This is a bus message, not a process kill — a deactivated skill's process keeps running (still visible in `GET /skills/running`), it just stops responding to intents/utterances until reactivated.
+
+There's no bus message to ask a running skill its own state back, so `GET /skills/{skill_id}/active` reads from the same persisted file rather than a live query — kept in sync since every change goes through the same code path that writes it.
 
 Installing prefers a real, published PyPI release over the catalog's git source when one exists — more stable than whatever's on a repo's default branch.
 
