@@ -1,4 +1,4 @@
 configuration:
   web_public_url:
     name: "Web public URL"
-    description: "Set this if the terminal page loads but stays blank/unstyled and never connects. Example: http://192.168.1.50:8000 -- the address your OWN browser uses to reach this add-on (your Home Assistant host's LAN IP, with the same port shown in this add-on's Network settings). Leave blank to try this add-on's own hostname first, which works automatically on networks that support mDNS."
+    description: "Usually not needed -- this add-on tries to auto-detect it from Home Assistant's own configured internal URL first. Set this manually (e.g. http://192.168.1.50:8000, using your Home Assistant host's LAN IP and this add-on's own port) only if the page still loads blank/unstyled after a restart -- that means auto-detection didn't find anything usable, most likely because Home Assistant's own internal URL is set to 'automatic' with nothing to detect."

@@ -69,7 +69,29 @@ done
 # figured out, including the two things that didn't work first.
 WEB_PUBLIC_URL=$(bashio::config 'web_public_url')
 if [ -z "${WEB_PUBLIC_URL}" ] || [ "${WEB_PUBLIC_URL}" = "null" ]; then
-  WEB_PUBLIC_URL="http://b8e040e3-ovos-tui:8000"
+  # Auto-detect from Home Assistant Core's own /api/config -- its
+  # internal_url is exactly "the address to reach this HA instance
+  # from the local network", the same thing this add-on needs, and
+  # the user has usually already got it right (auto-detected by HA
+  # itself, or set once during onboarding) without needing to type
+  # anything a second time here. Confirmed pattern from developers.
+  # home-assistant.io's own docs (homeassistant_api: true + SUPERVISOR_
+  # TOKEN as a bearer token against http://supervisor/core/api/config).
+  # Best-effort only: internal_url can genuinely be null (e.g. "automatic"
+  # detection with nothing to detect) -- falls back to this add-on's
+  # own hostname (works via mDNS) rather than failing outright, same
+  # as before this existed.
+  HA_INTERNAL_URL=$(curl -s -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
+    -H "Content-Type: application/json" \
+    http://supervisor/core/api/config 2>/dev/null | jq -r '.internal_url // empty')
+  if [ -n "${HA_INTERNAL_URL}" ]; then
+    HA_HOST=$(echo "${HA_INTERNAL_URL}" | sed -E 's#^https?://##; s#[:/].*##')
+    WEB_PUBLIC_URL="http://${HA_HOST}:8000"
+    bashio::log.info "Auto-detected public URL from Home Assistant's own internal_url: ${WEB_PUBLIC_URL}"
+  else
+    WEB_PUBLIC_URL="http://b8e040e3-ovos-tui:8000"
+    bashio::log.info "Could not auto-detect a LAN address from Home Assistant's own config (internal_url not set) -- falling back to this add-on's own hostname. Set web_public_url manually if that doesn't resolve for your browser."
+  fi
 fi
 
 bashio::log.info "Starting ovos-tui-client in --web mode on :8000 (public URL: ${WEB_PUBLIC_URL})"
