@@ -2,64 +2,71 @@
 
 <img src="logo.png" width="96" height="96" alt="OpenVoiceOS logo">
 
-Home Assistant OS (Supervisor) add-ons that bring [OpenVoiceOS](https://openvoiceos.org) into Home Assistant's own Assist pipeline — discoverable and configurable the way HAOS users already expect: Add-on Store, install, fill in a form.
+Home Assistant OS (Supervisor) add-ons that bring [OpenVoiceOS](https://openvoiceos.org) into Home Assistant's own Assist pipeline — install from the Add-on Store, fill in a form, done. No manual config files, no command line.
 
 ## Installation
 
 1. In Home Assistant: **Settings → Add-ons → Add-on Store**.
 2. Top right **⋮ → Repositories**, paste `https://github.com/andlo/haos-ovos-addons`, **Add**.
-3. The add-ons below now appear in the store. Install the ones you need — see "Two ways to use this" below for which ones.
+3. The add-ons below now appear in the store. You don't need all of them — see "Which add-ons do I actually need?" below to pick.
 
 ## Add-ons in this repo
 
 | Add-on | What it does |
 |---|---|
-| `ovos-wyoming-tts` | Text-to-speech engine for the Assist pipeline, via any OVOS TTS plugin |
-| `ovos-wyoming-stt` | Speech-to-text engine for the Assist pipeline, via any OVOS STT plugin |
-| `ovos-wyoming-wakeword` | Wake word engine for the Assist pipeline, via any OVOS wake word plugin |
-| `ovos-persona` | Conversation agent (Ollama/OpenAI-compatible), for open-ended questions |
-| `ovos-core` | The skill runtime: shared messagebus, intent matching, and a synchronous question/answer API |
-| `ovos-skills` | Install/remove/configure a small, curated set of OVOS skills known to work in this setup |
-| `ovos-skills-extra` | Install ANY OVOS skill from PyPI or a git URL — unverified, unrestricted |
+| `ovos-wyoming-tts` | Text-to-speech for Assist, via any OVOS TTS plugin |
+| `ovos-wyoming-stt` | Speech-to-text for Assist, via any OVOS STT plugin |
+| `ovos-wyoming-wakeword` | Wake word detection for Assist, via any OVOS wake word plugin |
+| `ovos-persona` | A conversation agent for open-ended questions (Ollama/OpenAI-compatible) |
+| `ovos-core` | The skill runtime — runs skills and answers questions, the engine behind everything below |
+| `ovos-skills` | Install a small, tested set of OVOS skills (alarms, weather, general knowledge, ...) |
+| `ovos-skills-extra` | Install *any* OVOS skill from PyPI or a git link — nothing pre-checked, use if you know what you're installing |
+| `ovos-busmon` | Watch every message OVOS sends internally, live, as it happens — a debugging tool |
+| `ovos-tui` | Type what you'd say and watch OVOS answer, without needing a microphone — a testing tool |
+| `ovos-control-panel` | The official OpenVoiceOS admin page, for things this project's own integration doesn't cover yet |
 
-See each add-on's own `DOCS.md` for setup, configuration, and API details.
+See each add-on's own `DOCS.md` (visible from its page in the Add-on Store) for full setup and configuration details.
 
-## Two ways to use this
+## Which add-ons do I actually need?
 
-These add-ons work at two different levels, and you don't need the second to use the first.
+Three different starting points, depending on what you're trying to do. You can mix and match — none of them require each other.
 
-### 1. Extend Assist with better building blocks
+### "I just want better voice recognition/speech in Assist"
 
-Install just `ovos-wyoming-tts`, `ovos-wyoming-stt`, `ovos-wyoming-wakeword`, and/or `ovos-persona` — pick any combination. Each one plugs directly into HA's own, existing Assist pipeline settings as an alternative TTS/STT/wake-word engine or conversation agent. Nothing else in this repo is required.
+Install any combination of `ovos-wyoming-tts`, `ovos-wyoming-stt`, `ovos-wyoming-wakeword`, and `ovos-persona`. That's it — nothing else in this repo is needed.
 
-**Setup:**
-1. Install and start whichever of the four add-ons you want.
-2. `ovos-wyoming-*` add-ons announce themselves automatically — they show up under **Settings → Devices & services → Discovered**. Add them, then select each as the engine in **Settings → Voice assistants → Assist → [your pipeline]**.
-3. For `ovos-persona`, add HA's own **Ollama** integration, pointed at the add-on's address (`http://<hostname>:8337`), then select the resulting agent in the same pipeline settings.
+1. Install and start whichever ones you want.
+2. The three `ovos-wyoming-*` add-ons show up automatically under **Settings → Devices & services → Discovered** — add them from there, then pick each one as the engine in **Settings → Voice assistants → Assist → [your pipeline]**.
+3. For `ovos-persona`, add Home Assistant's own **Ollama** integration pointed at `http://<hostname>:8337`, then select it as the conversation agent in the same pipeline settings.
 
-This is the whole story for this path — no `ha-ovos-integration`, no `ovos-core`, no skills.
+### "I want OVOS skills — alarms, weather, trivia — running through Assist"
 
-### 2. A full OVOS backend — skills, its own conversation agent, all managed from HA
+Install `ovos-core` and `ovos-skills` (add `ovos-skills-extra` and/or `ovos-persona` if you want them too).
 
-Install `ovos-core` plus `ovos-skills` (and optionally `ovos-skills-extra` and `ovos-persona`) to get a real, running OVOS skill runtime behind Assist — alarms, weather, general-knowledge answers, and anything else a skill can do, not just better TTS/STT.
+1. Install and start `ovos-core` and `ovos-skills`.
+2. Install [ha-ovos-integration](https://github.com/andlo/ha-ovos-integration) via HACS, then add the **OpenVoiceOS** integration in Home Assistant.
+3. In the integration's settings, enter each add-on's address (e.g. `http://<hostname>:8500` for `ovos-core`).
+4. From the integration, use **Add sub-entry** to install skills and set up voice/persona — these are normal Home Assistant setup screens, no config files.
+5. Select **OpenVoiceOS** as the conversation agent under **Settings → Voice assistants → Assist → [your pipeline]** — this is the step that actually connects your skills to Assist.
 
-**Setup:**
-1. Install and start `ovos-core`, `ovos-skills`, and any of `ovos-skills-extra`/`ovos-persona` you also want.
-2. Install [ha-ovos-integration](https://github.com/andlo/ha-ovos-integration) via HACS, then add the **OpenVoiceOS** integration in HA.
-3. Fill in each add-on's own API URL under the integration's entities (e.g. `http://<hostname>:8500` for `ovos-core`).
-4. Use the integration's **Add sub-entry** to install skills, run guided voice setup, and configure persona — all as ordinary HA config flows.
-5. Select **OpenVoiceOS** as the conversation agent in **Settings → Voice assistants → Assist → [your pipeline]** — this is what actually connects Assist to your installed skills.
+### "Something isn't working right, or I want to see/change more than the integration offers"
 
-Nothing stops you combining both: use the Wyoming add-ons for TTS/STT/wake-word (path 1) while also running the full skill backend (path 2) in the same pipeline.
+Three optional tools, each for a different kind of digging:
+
+- **`ovos-tui`** — the fastest way to check "does this skill even work?" Type a sentence, see what OVOS does with it, no microphone or wake word needed. Start here if a skill isn't answering the way you expect.
+- **`ovos-busmon`** — when `ovos-tui` isn't enough and you want to see the raw traffic between every OVOS component in real time. More detail, more setup (needs a login you set yourself in its Configuration tab).
+- **`ovos-control-panel`** — the official OpenVoiceOS admin page. Covers things `ha-ovos-integration` doesn't yet: installing OVOS plugins, editing personas directly, translating a skill, backing up and restoring settings.
+
+All three are debugging/admin tools, not something to leave running all the time — each one defaults to **not starting automatically** on boot (`boot: manual`), and needs its own login set before you rely on it (see its own `DOCS.md`).
 
 ## How they fit together
 
-- `ovos-wyoming-*` plug directly into HA's own Assist pipeline settings — no other add-on required.
-- `ovos-core` hosts the shared messagebus; `ovos-skills`/`ovos-skills-extra` launch each installed skill's own process against it.
-- `ovos-persona` is fully independent — runs with or without any of the others.
-- All add-ons that use a shared `mycroft.conf` (language, TTS/STT module, etc.) read and write it via `/share`.
+- `ovos-wyoming-*` plug straight into Assist's own settings — no other add-on needed.
+- `ovos-core` hosts the shared messagebus that everything else talks over; `ovos-skills`/`ovos-skills-extra` run each installed skill against it.
+- `ovos-persona`, `ovos-busmon`, `ovos-tui`, and `ovos-control-panel` are each independent — install any of them with or without the others.
+- Add-ons that share settings (language, which TTS/STT to use, which skills are installed) all read and write the same files on `/share`, so `ovos-control-panel`'s Settings page, `ovos-tui`'s pipeline view, and `ha-ovos-integration`'s own entities all agree with each other automatically.
 
-Managed day-to-day through [ha-ovos-integration](https://github.com/andlo/ha-ovos-integration), a Home Assistant integration that turns skill installs, voice setup, and persona configuration into ordinary HA config flows — this repo is the add-ons it talks to.
+Day-to-day, most people manage this through [ha-ovos-integration](https://github.com/andlo/ha-ovos-integration) — a Home Assistant integration that turns skill installs, voice setup, and persona configuration into ordinary HA setup screens. This repo is the add-ons it talks to; `ovos-busmon`/`ovos-tui`/`ovos-control-panel` are there for when you need to look under the hood.
 
 ## License
 
