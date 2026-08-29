@@ -1,0 +1,4 @@
+configuration:
+  token:
+    name: "Access token"
+    description: "Required since this add-on binds beyond 127.0.0.1 -- change this from the default before relying on it. This tool changes the actual configuration of every OVOS service on this stack; treat this token like a real password."
