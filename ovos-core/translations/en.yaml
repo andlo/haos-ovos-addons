@@ -8,17 +8,36 @@ configuration:
   intent_matcher:
     name: "Intent matcher (advanced)"
     description: >-
-      How spoken/typed requests get matched to a skill. 'padacioso'
-      (default, recommended) is lightweight and safe on shared or
-      resource-constrained hosts, but slows down as more skills are
-      installed. 'padatious' is OVOS's official default, more capable
-      and faster per-match once trained -- but its dependencies
-      (numpy/scipy/sklearn/fann2) are memory-heavy; on a host already
-      under memory pressure (many other add-ons, containers, or apps
-      running) it can crash this add-on outright rather than just being
-      slow. Pick padatious only if this host has real memory headroom
-      to spare (a good rule of thumb: several GB genuinely free, not
-      just technically available) -- if unsure, stay on padacioso.
-      Changing this reinstalls a real dependency on next restart, not
-      just a config toggle -- expect the first restart after switching
-      to take longer than normal.
+      How spoken/typed requests get matched to a skill. 'padatious'
+      (default) is OVOS's own official default and what OpenVoiceOS's
+      own reference Docker images (ovos-docker) ship -- a compiled,
+      trained matcher, fast and accurate once trained. Its dependencies
+      (numpy/scipy/sklearn/fann2) are memory-heavy: this add-on needs a
+      host with real free memory headroom (several GB genuinely free,
+      not just technically available), confirmed by a real, reproduced
+      segfault under memory pressure on an under-resourced host running
+      many other add-ons simultaneously -- not a bug in padatious
+      itself, just a real resource requirement. 'padacioso' is a
+      lightweight, pure-Python fallback for genuinely memory-constrained
+      hosts, but currently has a known, unresolved bug on this stack
+      where registered skill intents silently fail to match at all
+      (see DOCS.md's "Intent pipeline" section) -- not recommended
+      until that's root-caused. Changing this reinstalls a real
+      dependency on next restart, not just a config toggle -- expect
+      the first restart after switching to take longer than normal.
+  secondary_langs:
+    name: "Secondary languages (advanced)"
+    description: >-
+      Space-separated language tags (e.g. "da-dk sv-se") to build intent
+      matcher containers for, in addition to the shared config's primary
+      "lang". Confirmed by reading padatious.opm/padacioso.opm directly:
+      these containers are built ONCE at startup from "lang" +
+      "secondary_langs" -- switching the primary language at runtime
+      (e.g. via ha-ovos-integration's language entity) does NOT rebuild
+      containers for a newly-active language unless it was already
+      listed here at boot, so intents silently stop matching after a
+      language switch unless the target language is included. Skills
+      still need their own locale-specific intent/dialog files to
+      actually match/respond in a given language -- this only makes the
+      matcher capable of using them, it doesn't add translations a skill
+      doesn't ship. Empty this if you only ever use one language.

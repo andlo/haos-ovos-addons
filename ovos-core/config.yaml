@@ -1,5 +1,5 @@
 name: "OVOS Core"
-version: "0.0.19"
+version: "0.0.21"
 slug: "ovos_core"
 description: "OVOS skill runtime — loads installed skills and answers questions via a synchronous HTTP endpoint, usable as a Home Assistant conversation agent"
 url: "https://github.com/andlo/haos-ovos-addons/tree/master/ovos-core"
@@ -20,8 +20,10 @@ ports_description:
 options:
   extra_pip_packages: ""
   log_level: "info"
-  intent_matcher: "padacioso"
+  intent_matcher: "padatious"
+  secondary_langs: "da-dk"
 schema:
   extra_pip_packages: "str"
   log_level: "list(debug|info|warning|error)"
   intent_matcher: "list(padacioso|padatious)"
+  secondary_langs: "str"

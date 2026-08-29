@@ -666,9 +666,29 @@ class SkillProcessManager:
     def discover_and_launch_all(self):
         """Launch every currently-installed skill. Called once at
         startup, after _rebuild_all_venvs_from_manifest() has finished.
+
+        Staggered, not a tight back-to-back loop -- confirmed via
+        haos-ovos-dev (2026-08-29) that launching all skills at once
+        (subprocess.Popen, non-blocking, zero delay between calls)
+        clusters every skill's own "padatious:register_intent" bus
+        emission into a very tight window right after each one
+        connects. ovos-padatious's own training_manager has a real,
+        reproducible concurrency bug under that load -- "dictionary
+        changed size during iteration" / bare-string KeyErrors during
+        training, and the intents that fail training then fail to load
+        from cache too (never written), so they silently never match.
+        Confirmed NOT fixed by padatious's own "workers" config (that
+        controls FANN training-math parallelism, not this registration-
+        bookkeeping race). This stagger is the working hypothesis, not
+        yet independently reproduced on a from-scratch boot -- see
+        DOCS.md for confirmed/pending status before trusting this
+        comment alone. 0.5s is empirical, not derived from anything in
+        padatious's own source; revisit if it's ever insufficient with
+        a much larger skill catalog.
         """
         for skill_id in self._discover():
             self.launch(skill_id)
+            time.sleep(0.5)
 
     def _monitor_loop(self):
         while True:

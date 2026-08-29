@@ -75,6 +75,10 @@ A skill's own settings (`settings.json`) are separate from its venv and always p
 
 After launching any skill (fresh install or container restart), this add-on broadcasts a `mycroft.ready` bus message a few seconds later. Needed because `ovos-core`'s own readiness tracking only ever sees skills installed in its own environment -- it has no way to know skills running in this add-on's separate container exist at all, so a skill's own "is ovos-core ready?" check can answer "no" indefinitely otherwise, leaving it stuck waiting. Harmless for skills that already loaded correctly.
 
+## Skill launches are staggered, not simultaneous
+
+`discover_and_launch_all()` sleeps 0.5s between each `subprocess.Popen` call rather than firing all of them back-to-back. Found via `ovos-core`'s own DOCS.md investigation (2026-08-29, once `padatious` became the default there): launching every skill at once clusters all their `padatious:register_intent` bus emissions into a very tight window, and `ovos-padatious`'s own training manager has a real, reproducible concurrency bug under that load (`dictionary changed size during iteration` / bare-string `KeyError`s during training) -- intents that hit it fail to train, then fail to load from cache too (the file was never written), and silently never match afterward. The stagger reduced this from roughly a dozen affected intents per full-catalog boot to about one, on the same dev VM -- a large improvement, not a complete fix; the underlying `ovos-padatious` bug itself is still open upstream, unreported as of this writing.
+
 ## Known limitations
 
 - Reinstalling on every container rebuild/update needs network access at boot to restore previously-installed skills.

@@ -63,9 +63,37 @@ fi
 # constructed), but required for padacioso to work at all when it's the
 # active choice -- so simplest to always set it explicitly rather than
 # branch on that too.
+#
+# padatious.instant_train set true -- NOT a confirmed fix for
+# padacioso's intent-matching bug (see DOCS.md's "Intent pipeline" --
+# tested on haos-ovos-dev 2026-08-29, made no difference: skills still
+# never matched in either language). Left set anyway since it's the
+# documented, correct config for padatious itself to train synchronously
+# rather than depend on the "mycroft.skills.train" bus round-trip that
+# nothing in this stack answers (see the skill_manager.py investigation
+# in git history) -- harmless either way, genuinely helps padatious,
+# just isn't the padacioso fix it was first assumed to be.
 jq --argjson pipeline "${PIPELINE}" \
-  '. + {intents: ((.intents // {}) + {disable_padacioso: false, pipeline: $pipeline})}' \
+  '. + {intents: ((.intents // {}) + {disable_padacioso: false, pipeline: $pipeline})} + {padatious: ((.padatious // {}) + {instant_train: true})}' \
   "${CONF_FILE}" > "${CONF_FILE}.tmp" && mv "${CONF_FILE}.tmp" "${CONF_FILE}"
+
+# secondary_langs -- confirmed by reading padatious.opm/padacioso.opm's
+# __init__ directly: intent-matcher containers are built ONCE at boot
+# from "lang" + "secondary_langs", never rebuilt when the active
+# language is switched at runtime (e.g. via ha-ovos-integration's
+# language entity). Without the target language listed here at boot,
+# switching to it makes every skill's intents silently stop matching --
+# confirmed reproduced on haos-ovos-dev 2026-08-29 (da-dk switch test:
+# 0/9 skills matched, despite ovos-skill-date-time shipping real da-dk
+# .intent files on disk that were simply never loaded into any
+# container). User-configurable rather than hardcoded since which
+# languages matter is a per-deployment choice, not a fixed default.
+SECONDARY_LANGS=$(bashio::config 'secondary_langs')
+if [ -n "${SECONDARY_LANGS}" ]; then
+  jq --arg langs "${SECONDARY_LANGS}" \
+    '. + {secondary_langs: ($langs | split(" ") | map(select(length > 0)))}' \
+    "${CONF_FILE}" > "${CONF_FILE}.tmp" && mv "${CONF_FILE}.tmp" "${CONF_FILE}"
+fi
 
 # ovos-common-query-pipeline-plugin RE-ENABLED -- the original
 # blacklist reasoning ("needs external services this add-on doesn't set
