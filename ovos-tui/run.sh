@@ -69,28 +69,39 @@ done
 # figured out, including the two things that didn't work first.
 WEB_PUBLIC_URL=$(bashio::config 'web_public_url')
 if [ -z "${WEB_PUBLIC_URL}" ] || [ "${WEB_PUBLIC_URL}" = "null" ]; then
-  # Auto-detect from Home Assistant Core's own /api/config -- its
-  # internal_url is exactly "the address to reach this HA instance
-  # from the local network", the same thing this add-on needs, and
-  # the user has usually already got it right (auto-detected by HA
-  # itself, or set once during onboarding) without needing to type
-  # anything a second time here. Confirmed pattern from developers.
-  # home-assistant.io's own docs (homeassistant_api: true + SUPERVISOR_
-  # TOKEN as a bearer token against http://supervisor/core/api/config).
-  # Best-effort only: internal_url can genuinely be null (e.g. "automatic"
-  # detection with nothing to detect) -- falls back to this add-on's
-  # own hostname (works via mDNS) rather than failing outright, same
-  # as before this existed.
-  HA_INTERNAL_URL=$(curl -s -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
-    -H "Content-Type: application/json" \
-    http://supervisor/core/api/config 2>/dev/null | jq -r '.internal_url // empty')
-  if [ -n "${HA_INTERNAL_URL}" ]; then
-    HA_HOST=$(echo "${HA_INTERNAL_URL}" | sed -E 's#^https?://##; s#[:/].*##')
-    WEB_PUBLIC_URL="http://${HA_HOST}:8000"
-    bashio::log.info "Auto-detected public URL from Home Assistant's own internal_url: ${WEB_PUBLIC_URL}"
+  # Try 1: Supervisor's own /network/interface/default/info -- the
+  # host's real IP on whichever interface actually has the default
+  # route, i.e. its normal LAN-facing address. Doesn't depend on the
+  # user having configured anything -- confirmed real, documented
+  # endpoint+response shape (.data.ipv4.address is a list of
+  # "x.x.x.x/yy" CIDR strings; take the first, strip the prefix).
+  # Requires this add-on's hassio_api: true permission.
+  NET_IP=$(curl -s -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
+    http://supervisor/network/interface/default/info 2>/dev/null \
+    | jq -r '.data.ipv4.address[0] // empty' | cut -d/ -f1)
+
+  # Try 2: Home Assistant Core's own /api/config internal_url --
+  # kept as a second attempt for the rarer case where the default-
+  # route interface isn't the one actually worth advertising (e.g. a
+  # VPN/Tailscale interface holds the default route instead of the
+  # real LAN one) and the user has internal_url genuinely configured.
+  # Confirmed pattern from developers.home-assistant.io's own docs.
+  # Requires this add-on's homeassistant_api: true permission.
+  if [ -z "${NET_IP}" ]; then
+    HA_INTERNAL_URL=$(curl -s -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
+      -H "Content-Type: application/json" \
+      http://supervisor/core/api/config 2>/dev/null | jq -r '.internal_url // empty')
+    if [ -n "${HA_INTERNAL_URL}" ]; then
+      NET_IP=$(echo "${HA_INTERNAL_URL}" | sed -E 's#^https?://##; s#[:/].*##')
+    fi
+  fi
+
+  if [ -n "${NET_IP}" ]; then
+    WEB_PUBLIC_URL="http://${NET_IP}:8000"
+    bashio::log.info "Auto-detected public URL: ${WEB_PUBLIC_URL}"
   else
     WEB_PUBLIC_URL="http://b8e040e3-ovos-tui:8000"
-    bashio::log.info "Could not auto-detect a LAN address from Home Assistant's own config (internal_url not set) -- falling back to this add-on's own hostname. Set web_public_url manually if that doesn't resolve for your browser."
+    bashio::log.info "Could not auto-detect a LAN address (neither Supervisor's own network info nor Home Assistant's internal_url gave anything usable) -- falling back to this add-on's own hostname. Set web_public_url manually if that doesn't resolve for your browser."
   fi
 fi
 

@@ -1,5 +1,5 @@
 name: "OVOS TUI"
-version: "0.0.7"
+version: "0.0.8"
 slug: "ovos_tui"
 description: "andlo/ovos-tui-client running in --web mode: type utterances, watch the conversation and activity feed, without a mic/speaker"
 url: "https://github.com/andlo/haos-ovos-addons/tree/master/ovos-tui"
@@ -10,6 +10,7 @@ init: false
 startup: services
 boot: manual
 homeassistant_api: true
+hassio_api: true
 map:
   - share:rw
 ports:

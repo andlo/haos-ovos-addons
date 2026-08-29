@@ -29,7 +29,12 @@ Type an utterance and see exactly what OVOS does with it: which skill answered (
 
 **Fixed properly upstream in `ovos-tui-client` v0.1.25**, which added `--web-public-url`: a separate flag that overrides only the URLs baked into the page, completely independent of the bind address. This add-on now always binds `0.0.0.0` (works unconditionally) and passes `web_public_url` through to `--web-public-url`.
 
-**Auto-detected by default** from Home Assistant Core's own `/api/config` (`internal_url` -- exactly "the address to reach this HA instance from the local network", usually already correctly set, auto-detected or otherwise, without you needing to type it again here). Requires this add-on's `homeassistant_api: true` permission, granted on install/rebuild. Falls back to this add-on's own hostname (works wherever mDNS does) if Home Assistant's own `internal_url` is unset (e.g. left on "automatic" with nothing concrete to detect) -- check this add-on's own log line ("Auto-detected public URL from..." vs "Could not auto-detect...") to see which happened. Set `web_public_url` manually only if neither gives you a working page.
+**Auto-detected by default**, in order:
+1. Supervisor's own `/network/interface/default/info` -- the host's real IP on whichever interface actually has the default route (its normal LAN-facing address). Doesn't depend on you having configured anything. Requires this add-on's `hassio_api: true` permission.
+2. Home Assistant Core's own `/api/config` `internal_url`, if (1) gave nothing -- exactly "the address to reach this HA instance from the local network", if you've set it. Requires `homeassistant_api: true`.
+3. This add-on's own hostname (works wherever mDNS does) -- the final fallback if neither of the above gave anything usable (confirmed on at least one real setup: a dev VM with no `internal_url` configured still got a working address from step 1 alone).
+
+Both permissions are granted on install/rebuild. Check this add-on's own log line ("Auto-detected public URL: ..." vs "Could not auto-detect...") to see what happened on your system. Set `web_public_url` manually only if none of the above gives you a working page.
 
 ## Known limitations
 
