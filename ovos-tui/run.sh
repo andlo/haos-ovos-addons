@@ -92,6 +92,19 @@ if [ -n "${WEB_HOST}" ]; then
   WEB_HOST_ARG="--web-host ${WEB_HOST}"
 fi
 
+# Wait for THIS add-on's own hostname to actually resolve before
+# binding to it -- confirmed needed for real: right after a fresh
+# `docker start`, Supervisor's internal DNS hadn't yet registered this
+# container's own hostname, so the very first launch attempt crashed
+# outright ("socket.gaierror: [Errno -5] Name has no usable address")
+# rather than just being slow to come up. Same shape as the bus-wait
+# loop above, just for DNS instead of a TCP port.
+SELF_HOST=$(echo "${WEB_HOST_ARG}" | awk '{print $2}')
+for i in $(seq 1 30); do
+  getent hosts "${SELF_HOST}" >/dev/null 2>&1 && break
+  sleep 1
+done
+
 bashio::log.info "Starting ovos-tui-client in --web mode on :8000"
 exec ovos-tui --host "${BUS_HOST}" --port "${BUS_PORT}" \
   --mycroft-conf /share/mycroft/mycroft.conf \
