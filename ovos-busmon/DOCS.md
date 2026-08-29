@@ -11,7 +11,13 @@ Debugging: watch every bus message live as it happens (filter by type, inspect p
 1. Install and start the other `haos-ovos-addons` add-ons first (this one connects to their shared bus, hosted by `ovos-core`).
 2. **Change the username/password** in this add-on's own Configuration tab -- upstream ships `ovos`/`ovos` as its default, and this add-on inherits that same default until changed.
 3. Start this add-on (`boot: manual` by default -- deliberately not started automatically on every boot, see "Security").
-4. Open `http://<hostname>:8005/` in a browser.
+4. **Open `http://<hostname>:8005/api/status` first**, not `/` -- see "Logging in" below for why this specific first step matters.
+
+## Logging in
+
+Confirmed in practice: opening `http://<hostname>:8005/` directly does NOT prompt for a login. The static page itself isn't behind HTTP Basic Auth -- only the `/api/*` calls the page makes in the background are, and a background `fetch()` call that gets a 401 never triggers a browser's native login popup (browsers only show that for a full top-level page load that itself needs auth) -- so the dashboard just looks permanently disconnected, with no way to ever get prompted for credentials from the app itself.
+
+**Workaround:** open `http://<hostname>:8005/api/status` directly in the address bar first. That request DOES need auth, so the browser prompts natively there. Enter the username/password from step 2 above. Then go to `http://<hostname>:8005/` (or reload it, if already open) -- the browser now has those credentials cached for the same origin, and the dashboard's own background API calls succeed.
 
 ## Security
 

@@ -1,5 +1,5 @@
 name: "OVOS Bus Monitor"
-version: "0.0.3"
+version: "0.0.4"
 slug: "ovos_busmon"
 description: "Live messagebus monitor, capture, and injection tool for debugging OVOS -- OpenVoiceOS/ovos-busmon, unmodified"
 url: "https://github.com/andlo/haos-ovos-addons/tree/master/ovos-busmon"
