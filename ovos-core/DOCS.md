@@ -7,10 +7,18 @@ The skill runtime and messagebus for the whole project. Hosts the shared `ovos-m
 | Endpoint | What it does |
 |---|---|
 | `GET /health` | `{"bus_connected": true/false}` |
-| `POST /ask` | Body `{"utterance": "what time is it", "lang": "en-us"}`. Injects the utterance as if a real STT transcribed it, waits (up to 35s) for a skill or fallback to *speak* a response, returns `{"utterance": "...", "skill": "..."}`. `504` if nothing spoke in time — **note:** this also fires for utterances that were matched and handled but produced no spoken response (e.g. "stop"), not only for genuinely unmatched ones; see Known limitations. |
+| `POST /ask` | Body `{"utterance": "what time is it", "lang": "en-us"}`. Injects the utterance as if a real STT transcribed it, waits (up to 35s) for a skill or fallback to *speak* a response, returns `{"utterance": "...", "skill": "...", "expect_response": bool}`. `504` if nothing spoke in time — **note:** this also fires for utterances that were matched and handled but produced no spoken response (e.g. "stop"), not only for genuinely unmatched ones; see Known limitations. |
 | `POST /autoconfigure` | Body `{"lang": "en-us", "online": false, "offline": false, "male": false, "female": false}`. Runs `ovos-config autoconfigure` against the shared `mycroft.conf`, picking TTS/STT plugins for the given language/mode. Returns `changed_keys`, `not_available` (nothing found for that combination), and the resulting `tts_module`/`stt_module`. Doesn't install anything — picking a plugin and installing it are separate steps, same as OVOS's own tooling. |
 
 Requests to `/ask` are serialized (one at a time, not matched by session) — concurrent requests queue rather than racing.
+
+## Multi-turn dialogs (`expect_response`)
+
+Some skills ask a follow-up question via their own `get_response()` (e.g. "what time should the alarm be?") rather than answering in one shot. `/ask` detects this by also listening for `mycroft.mic.listen` -- confirmed by reading `ovos_workshop`'s own `get_response()` directly: it speaks the dialog (the same `speak` event `/ask` already waits for), then emits this message to signal it's now blocking its own thread waiting for the user's next utterance. A short (1.5s) grace period after `speak` catches this without doubling the total wait -- the two emissions are back-to-back from the same skill thread handling the same utterance, not independently timed.
+
+When `expect_response` is `true`, the caller (`ha-ovos-integration`'s own conversation agent) should treat this as "the conversation isn't over" -- Home Assistant's own Assist protocol has a real, existing mechanism for exactly this (`continue_conversation` + `conversation_id`, see [developers.home-assistant.io/docs/intent_conversation_api](https://developers.home-assistant.io/docs/intent_conversation_api)), not something invented here. The follow-up utterance needs no special session routing on the caller's side -- it can be sent through `/ask` again like any other utterance, since it's OVOS's own bus (not this HTTP layer) that routes it back to the specific skill still waiting on its own `get_response()` call.
+
+Confirmed directly, via a controlled test (manually emitting `mycroft.mic.listen` alongside a real `/ask` call, isolating this detection from the separate, already-documented intent-matching reliability issues below): the detection itself works correctly end-to-end. **Not yet confirmed**: a full round-trip through a real skill's own multi-turn flow (e.g. `ovos-skill-alerts` asking for an alarm time) -- blocked by the same intent-matching unreliability that affects this stack more broadly, not a flaw in this mechanism specifically.
 
 ## Configuration
 

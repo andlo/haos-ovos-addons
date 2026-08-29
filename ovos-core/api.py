@@ -189,20 +189,50 @@ def _ask_sync(utterance: str, lang: str) -> dict | None:
     were being computed the whole time (confirmed via `docker stats`
     showing genuine CPU work, not a hang), just never delivered back
     here, because nothing was listening for the message actually sent.
+
+    ALSO listens for "mycroft.mic.listen" -- confirmed by reading
+    ovos_workshop's own get_response() directly: when a skill needs a
+    follow-up reply (e.g. "what time should the alarm be?"), it speaks
+    the dialog (the same "speak" event above) and then emits this
+    message to signal it's now waiting for the user's next utterance --
+    then BLOCKS ITS OWN THREAD waiting for that reply to arrive on the
+    bus, rather than returning like a normal one-shot answer. Nothing
+    else in this synchronous-bridge architecture (no real mic/wake-word
+    loop feeding the bus) would emit this message under normal use, so
+    seeing it here is a reliable signal specifically that a skill wants
+    a follow-up, not a false positive from unrelated bus activity.
+
+    Grace-period design, not a second full-length wait: "speak" and
+    "mycroft.mic.listen" are two back-to-back emissions from the SAME
+    skill thread handling this SAME utterance (get_response() speaks,
+    then immediately emits the listen signal before blocking) -- so if
+    the second one is coming at all, it arrives within a couple hundred
+    ms of the first, not after any meaningful additional wait.
     """
     result: dict = {}
     done = threading.Event()
+    listening = threading.Event()
 
     def on_speak(message):
         result["utterance"] = message.data.get("utterance")
         result["skill"] = message.data.get("meta", {}).get("skill")
         done.set()
 
+    def on_listen(message):
+        listening.set()
+
     bus.on("speak", on_speak)
+    bus.on("mycroft.mic.listen", on_listen)
     bus.emit(Message("recognizer_loop:utterance",
                       {"utterances": [utterance], "lang": lang}))
     ok = done.wait(timeout=ASK_TIMEOUT)
+    if ok:
+        # Short grace period only, not ASK_TIMEOUT again -- see
+        # docstring above for why this is safe to keep brief.
+        listening.wait(timeout=1.5)
+        result["expect_response"] = listening.is_set()
     bus.remove("speak", on_speak)
+    bus.remove("mycroft.mic.listen", on_listen)
 
     return result if ok else None
 
