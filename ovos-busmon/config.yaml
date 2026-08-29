@@ -1,0 +1,25 @@
+name: "OVOS Bus Monitor"
+version: "0.0.1"
+slug: "ovos_busmon"
+description: "Live messagebus monitor, capture, and injection tool for debugging OVOS -- OpenVoiceOS/ovos-busmon, unmodified"
+url: "https://github.com/andlo/haos-ovos-addons/tree/master/ovos-busmon"
+arch:
+  - aarch64
+  - amd64
+init: false
+startup: services
+boot: manual
+map:
+  - share:rw
+ports:
+  8005/tcp: 8005
+ports_description:
+  8005/tcp: "Web UI + REST/SSE API -- open http://<hostname>:8005/ in a browser"
+options:
+  username: "ovos"
+  password: "ovos"
+  buffer_size: 2000
+schema:
+  username: "str"
+  password: "password"
+  buffer_size: "int(100,20000)"

@@ -1,0 +1,10 @@
+configuration:
+  username:
+    name: "Username"
+    description: "HTTP Basic auth username for the web UI/API"
+  password:
+    name: "Password"
+    description: "HTTP Basic auth password -- change this from the upstream default before exposing this add-on beyond a trusted LAN. The injection endpoint gives anyone who can log in full ability to emit any message on the shared bus."
+  buffer_size:
+    name: "Buffer size"
+    description: "How many recent bus messages to keep in the in-memory ring buffer (affects the timeline view and JSONL export, not the live stream itself)"
