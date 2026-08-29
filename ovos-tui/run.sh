@@ -88,7 +88,15 @@ done
 # add-on doesn't attempt to solve that case.
 WEB_HOST=$(bashio::config 'web_host')
 WEB_HOST_ARG="--web-host b8e040e3-ovos-tui"
-if [ -n "${WEB_HOST}" ]; then
+# bashio::config on a nullable ("str?") schema field returns the
+# LITERAL STRING "null", not an empty string, when the option is
+# genuinely unset -- confirmed the hard way: `[ -n "${WEB_HOST}" ]`
+# alone treated "null" as a real, non-empty value, so this add-on's
+# own default above was silently overridden with `--web-host null`,
+# and the hostname-wait loop below hung forever on `getent hosts null`
+# (a lookup that never succeeds, but also never fails fast in this
+# environment) instead of visibly erroring.
+if [ -n "${WEB_HOST}" ] && [ "${WEB_HOST}" != "null" ]; then
   WEB_HOST_ARG="--web-host ${WEB_HOST}"
 fi
 

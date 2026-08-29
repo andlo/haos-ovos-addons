@@ -1,5 +1,5 @@
 name: "OVOS TUI"
-version: "0.0.4"
+version: "0.0.5"
 slug: "ovos_tui"
 description: "andlo/ovos-tui-client running in --web mode: type utterances, watch the conversation and activity feed, without a mic/speaker"
 url: "https://github.com/andlo/haos-ovos-addons/tree/master/ovos-tui"
@@ -18,4 +18,4 @@ ports_description:
 options:
   web_host: ""
 schema:
-  web_host: "str?"
+  web_host: "str"
