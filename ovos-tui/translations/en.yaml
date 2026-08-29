@@ -1,4 +1,4 @@
 configuration:
-  web_host:
-    name: "Web host"
-    description: "Advanced/optional. Defaults to this add-on's own Docker hostname (reachable via mDNS/.local.hass.io on networks that support it) -- this only needs changing if that doesn't resolve for you AND you have another address this add-on's own container can genuinely bind to. Setting this to your Home Assistant host's real LAN IP will crash the add-on outright (a container can't bind to an address it doesn't own) unless it's running in host networking mode, which this add-on deliberately isn't."
+  web_public_url:
+    name: "Web public URL"
+    description: "Set this if the terminal page loads but stays blank/unstyled and never connects. Example: http://192.168.1.50:8000 -- the address your OWN browser uses to reach this add-on (your Home Assistant host's LAN IP, with the same port shown in this add-on's Network settings). Leave blank to try this add-on's own hostname first, which works automatically on networks that support mDNS."

@@ -48,74 +48,33 @@ done
 # Docker socket / log-bridging feature needed at all for the common
 # case where every add-on in this repo is what's being debugged (see
 # DOCS.md's "Known limitations" for what's still not covered this way).
-# --web-host: this tool's own --help is explicit that this is BOTH
-# the bind address AND the address baked into every absolute URL its
-# served HTML embeds (static asset <script>/<link> tags, the WebSocket
-# endpoint the terminal actually connects through) -- "guessing wrong
-# here breaks the page's styling/JS" per its own --help text, confirmed
-# for real: with the previous hardcoded "0.0.0.0" here, the browser
-# tried to load http://0.0.0.0:8000/static/js/textual.js and open
-# ws://0.0.0.0:8000/ws literally, both meaningless as destinations.
-# Auto-detection (no --web-host at all) isn't safe to rely on either --
-# confirmed by testing directly on this same VM: it resolved to
-# Supervisor's own internal Docker network IP (172.30.x.x), which is
-# real and valid but NOT reachable from a browser on the actual LAN,
-# same practical failure as 0.0.0.0. This add-on's own Docker hostname
-# (matching every other add-on's own convention) is real too, but only
-# resolves via mDNS (.local.hass.io) -- not guaranteed to work from
-# every browser/OS/network the way plain LAN-IP access (the way this
-# whole project's other add-ons get accessed in practice) does.
+# --web-host is ALWAYS 0.0.0.0 now, unconditionally -- binding always
+# succeeds (unlike a specific external IP, which crashes: "OSError:
+# could not bind on any address out of [...]"), and unlike this add-
+# on's own hostname, needs no DNS-ready-yet wait loop either.
 #
-# No single value here is correct for every deployment -- unlike a
-# plain bind address, this needs to be the address a PERSON'S OWN
-# BROWSER can actually reach, which only they know for their own
-# network. Exposed as a real, user-set option (web_host), but NOT
-# left empty by default: confirmed by testing directly that a
-# container can only bind to an address one of its OWN network
-# interfaces actually has (its own hostname, its own internal IP, or
-# 0.0.0.0) -- trying to bind directly to the HOST's own external LAN
-# IP from inside this add-on's own isolated network namespace fails
-# outright ("OSError: could not bind on any address out of [...]"),
-# it doesn't just render wrong. This add-on deliberately does NOT run
-# in host_network mode (a real, broader privilege tradeoff not taken
-# here) to make that work, so defaulting to this add-on's own real
-# Docker hostname -- reachable via HAOS's own mDNS advertisement
-# (hassio_dns/hassio_multicast), same mechanism other add-ons rely on
-# -- is the only default that's at least guaranteed not to crash. If
-# your browser/OS can't resolve it (some Windows/network setups don't
-# support mDNS), setting `web_host` to something your container CAN
-# still bind to may not be possible without host networking; this
-# add-on doesn't attempt to solve that case.
-WEB_HOST=$(bashio::config 'web_host')
-WEB_HOST_ARG="--web-host b8e040e3-ovos-tui"
-# bashio::config on a nullable ("str?") schema field returns the
-# LITERAL STRING "null", not an empty string, when the option is
-# genuinely unset -- confirmed the hard way: `[ -n "${WEB_HOST}" ]`
-# alone treated "null" as a real, non-empty value, so this add-on's
-# own default above was silently overridden with `--web-host null`,
-# and the hostname-wait loop below hung forever on `getent hosts null`
-# (a lookup that never succeeds, but also never fails fast in this
-# environment) instead of visibly erroring.
-if [ -n "${WEB_HOST}" ] && [ "${WEB_HOST}" != "null" ]; then
-  WEB_HOST_ARG="--web-host ${WEB_HOST}"
+# What used to require --web-host to ALSO be a browser-reachable
+# address is now handled by --web-public-url instead (added upstream
+# in ovos-tui-client v0.1.25 specifically for this: see its README's
+# "When --web-host can't be both the bind address and the reachable
+# one"). That flag ONLY affects the URLs baked into the served page's
+# own asset/WebSocket links -- completely independent of the bind
+# address above. This add-on's own web_public_url option maps
+# directly to it: leave blank and this add-on's own Docker hostname is
+# used (works automatically wherever mDNS/.local.hass.io resolution
+# works, same as before); set it to something like
+# http://192.168.1.50:8000 (this add-on's actual LAN-reachable
+# address) if that doesn't resolve for your browser/network -- see
+# DOCS.md's "The web_host problem" for the full story of how this was
+# figured out, including the two things that didn't work first.
+WEB_PUBLIC_URL=$(bashio::config 'web_public_url')
+if [ -z "${WEB_PUBLIC_URL}" ] || [ "${WEB_PUBLIC_URL}" = "null" ]; then
+  WEB_PUBLIC_URL="http://b8e040e3-ovos-tui:8000"
 fi
 
-# Wait for THIS add-on's own hostname to actually resolve before
-# binding to it -- confirmed needed for real: right after a fresh
-# `docker start`, Supervisor's internal DNS hadn't yet registered this
-# container's own hostname, so the very first launch attempt crashed
-# outright ("socket.gaierror: [Errno -5] Name has no usable address")
-# rather than just being slow to come up. Same shape as the bus-wait
-# loop above, just for DNS instead of a TCP port.
-SELF_HOST=$(echo "${WEB_HOST_ARG}" | awk '{print $2}')
-for i in $(seq 1 30); do
-  getent hosts "${SELF_HOST}" >/dev/null 2>&1 && break
-  sleep 1
-done
-
-bashio::log.info "Starting ovos-tui-client in --web mode on :8000"
+bashio::log.info "Starting ovos-tui-client in --web mode on :8000 (public URL: ${WEB_PUBLIC_URL})"
 exec ovos-tui --host "${BUS_HOST}" --port "${BUS_PORT}" \
   --mycroft-conf /share/mycroft/mycroft.conf \
   --log-dir /share/mycroft/logs \
   ${LANG_ARG} \
-  --web ${WEB_HOST_ARG} --web-port 8000
+  --web --web-host 0.0.0.0 --web-public-url "${WEB_PUBLIC_URL}" --web-port 8000
