@@ -45,6 +45,10 @@ The pipeline order (in `run.sh`) differs slightly by choice, but both follow the
 
 Binds on this add-on's own resolvable hostname (not `0.0.0.0`), since `ovos-messagebus`/`ovos-skill-launcher` read the same `websocket.host` value from the shared `mycroft.conf` for both binding and connecting — `ovos-skills`, `ovos-skills-extra`, and every skill's own launched process connect here. `ovos-persona` runs its own, separate, private bus and is not part of this.
 
+## Shared log files
+
+Sets `logs.path` to `/share/mycroft/logs` in the shared `mycroft.conf` — confirmed by reading `ovos_utils/log.py`'s own `init_service_logger()`/`get_logs_config()` directly: every OVOS service that calls this (the messagebus, this add-on's own skill manager, each skill `ovos-skills` launches, `ovos-persona-server`, ...) reads this same shared config for where to write its own log file, and logs to **both** the file and stdout once this is set — `docker logs` on any individual add-on keeps working exactly as before, this is purely additive. Since `/share` is already read-write-mounted into every add-on in this repo, this is what lets `ovos-tui` (see that add-on's own DOCS.md) read real log files directly with no Docker socket access needed at all.
+
 ## First-boot startup time
 
 The first boot downloads ML models (for the model2vec/Common Query pipeline plugins) from Hugging Face Hub — can take ~90 seconds. Subsequent boots are faster once those models are cached on `/share`. `api.py`'s own `/health` reports readiness rather than blocking.

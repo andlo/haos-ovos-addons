@@ -15,6 +15,25 @@ CONF_FILE="${CONF_DIR}/mycroft.conf"
 mkdir -p "${CONF_DIR}"
 [ -f "${CONF_FILE}" ] || echo '{}' > "${CONF_FILE}"
 
+# logs.path -- confirmed by reading ovos_utils/log.py's own
+# init_service_logger()/get_logs_config() directly: every OVOS service
+# that calls this (ovos-messagebus, ovos-core's own skill manager, each
+# skill launched by ovos-skills, ovos-persona-server, ...) reads this
+# SAME shared config for where to write its own log file -- and logs to
+# BOTH the file and stdout (so `docker logs` keeps working exactly as
+# before) once this is set to anything other than the default,
+# stdout-only "stdout" value. /share is already read-write-mounted into
+# every add-on in this repo, including ovos-tui -- pointing every
+# service's real log file there, instead of each container's own
+# private/ephemeral filesystem, is what lets ovos-tui's own --log-dir
+# read them directly, with no Docker socket access needed at all (see
+# ovos-tui/DOCS.md's "Known limitations" for the fuller context this
+# solves). Set here, once, on the same shared file every add-on's own
+# XDG_CONFIG_HOME=/share already points Configuration() at -- not
+# something each add-on needs to set for itself.
+jq '. + {logs: ((.logs // {}) + {path: "/share/mycroft/logs"})}' \
+  "${CONF_FILE}" > "${CONF_FILE}.tmp" && mv "${CONF_FILE}.tmp" "${CONF_FILE}"
+
 # CRITICAL, unlike ovos-skills' own private bus: this messagebus needs to
 # be reachable from OTHER add-on containers (ovos-skills today, others
 # later -- see DEVELOPER.md's shared-messagebus architecture).

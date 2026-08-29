@@ -39,12 +39,18 @@ done
 # reads/writes, not a private copy -- so the command palette's own
 # pipeline view reflects this project's real, current configuration.
 #
-# No --log-dir / Docker-socket-based log bridging in this pass --
-# deliberately not attempted, see DOCS.md's "Known limitations" for
-# why (a genuine privilege-escalation tradeoff, not something to
-# guess at silently including).
+# --log-dir /share/mycroft/logs -- ovos-core's own run.sh sets
+# logs.path to this same directory in the shared mycroft.conf, which
+# every OVOS service (confirmed via ovos_utils/log.py directly) reads
+# and writes its own real log file into, in addition to stdout, not
+# instead of it. Since /share is already read-write-mounted into this
+# add-on too, this tool reads those REAL log files directly -- no
+# Docker socket / log-bridging feature needed at all for the common
+# case where every add-on in this repo is what's being debugged (see
+# DOCS.md's "Known limitations" for what's still not covered this way).
 bashio::log.info "Starting ovos-tui-client in --web mode on :8000"
 exec ovos-tui --host "${BUS_HOST}" --port "${BUS_PORT}" \
   --mycroft-conf /share/mycroft/mycroft.conf \
+  --log-dir /share/mycroft/logs \
   ${LANG_ARG} \
   --web --web-host 0.0.0.0 --web-port 8000
