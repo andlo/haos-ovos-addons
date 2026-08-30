@@ -9,8 +9,16 @@ The skill runtime and messagebus for the whole project. Hosts the shared `ovos-m
 | `GET /health` | `{"bus_connected": true/false}` |
 | `POST /ask` | Body `{"utterance": "what time is it", "lang": "en-us"}`. Injects the utterance as if a real STT transcribed it, waits (up to 35s) for a skill or fallback to *speak* a response, returns `{"utterance": "...", "skill": "...", "expect_response": bool}`. `504` if nothing spoke in time — **note:** this also fires for utterances that were matched and handled but produced no spoken response (e.g. "stop"), not only for genuinely unmatched ones; see Known limitations. |
 | `POST /autoconfigure` | Body `{"lang": "en-us", "online": false, "offline": false, "male": false, "female": false}`. Runs `ovos-config autoconfigure` against the shared `mycroft.conf`, picking TTS/STT plugins for the given language/mode. Returns `changed_keys`, `not_available` (nothing found for that combination), and the resulting `tts_module`/`stt_module`. Doesn't install anything — picking a plugin and installing it are separate steps, same as OVOS's own tooling. |
+| `GET /config[?key=/path/to/key]` | The individual-setting escape hatch alongside `/autoconfigure`'s own curated flow. No `key` returns the whole shared config (same as `ovos-config show`'s joined table); a slash-delimited `key` (same path convention as `ovos-config get -k`) returns just that value, `404` if it doesn't exist. |
+| `PUT /config` | Body `{"key": "/path/to/key", "value": <any JSON value>}`. Sets a single key anywhere in the shared `mycroft.conf`, creating intermediate sections as needed. `409` if part of the path already exists as a non-section value (e.g. setting `/tts/module/foo` when `tts.module` is already a plain string). Always notes that the relevant add-on(s) likely need restarting — most OVOS services only read config once at startup. |
 
 Requests to `/ask` are serialized (one at a time, not matched by session) — concurrent requests queue rather than racing.
+
+## Individual settings (`GET`/`PUT /config`)
+
+`/autoconfigure` is a curated, language-driven flow for one specific thing (picking TTS/STT plugins). `/config` is the general escape hatch for everything else in the shared `mycroft.conf` — deliberately a thin, direct read/write of the real file, not a wrapper around `ovos-config get`/`set`: those commands' own fuzzy key-matching and interactive value prompting are built for a human at a terminal disambiguating from a list, not something a caller (`ha-ovos-integration`) can rely on getting one deterministic answer from. Confirmed working directly: reading/writing a leaf key, a `404` for a key that doesn't exist, a `409` for writing through a path where part of it is already a non-section value (e.g. `/tts/module/foo` when `tts.module` is already a string), and creating a brand-new nested path that didn't exist before.
+
+Tested, but genuinely worth flagging: this can set literally anything in the shared config, including keys `ha-ovos-integration` or other add-ons in this repo already manage their own way (`secondary_langs`, skill settings, etc.) — no reconciliation exists between this and those other write paths, same as `/autoconfigure`'s own already-documented note about that.
 
 ## Multi-turn dialogs (`expect_response`)
 

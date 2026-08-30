@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import subprocess
 import threading
@@ -172,6 +173,110 @@ def _read_shared_config() -> dict:
             return json.load(f)
     except (OSError, json.JSONDecodeError):
         return {}
+
+
+def _write_shared_config(config: dict) -> None:
+    tmp = SHARED_CONFIG_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=2)
+    os.replace(tmp, SHARED_CONFIG_PATH)  # atomic, same pattern as ovos-skills' own manifest/active-state writes
+
+
+def _get_by_path(config: dict, path: str):
+    """path like "/tts/module" or "tts/module" -- same slash-delimited
+    convention `ovos-config get -k /tts/module` itself uses (confirmed
+    via its own --help), not dot-notation, so a caller who already knows
+    that CLI's own path syntax can use the exact same string here.
+    """
+    node = config
+    for part in path.strip("/").split("/"):
+        if not isinstance(node, dict) or part not in node:
+            raise KeyError(path)
+        node = node[part]
+    return node
+
+
+def _set_by_path(config: dict, path: str, value) -> None:
+    """Same slash-delimited path convention as _get_by_path. Creates
+    intermediate dicts as needed (e.g. setting "/tts/module" on a config
+    with no "tts" key yet creates it) -- matches how ovos-config's own
+    `set` command behaves for a path that doesn't fully exist yet
+    (confirmed by reading its source: it uses dpath's own merge, which
+    does the same). Raises if an intermediate part exists but ISN'T a
+    dict (e.g. trying to set "/tts/module/foo" when "tts.module" is
+    already a plain string) -- a real conflict, not something to
+    silently paper over by overwriting a sibling value's own type.
+    """
+    parts = path.strip("/").split("/")
+    node = config
+    for part in parts[:-1]:
+        if part not in node:
+            node[part] = {}
+        elif not isinstance(node[part], dict):
+            raise TypeError(f"'{part}' in '{path}' is not a section (it's a {type(node[part]).__name__})")
+        node = node[part]
+    node[parts[-1]] = value
+
+
+class ConfigSetRequest(BaseModel):
+    key: str
+    value: object
+
+
+@app.get("/config")
+def get_config(key: str | None = None):
+    """Generic escape hatch alongside /autoconfigure's own curated,
+    language-driven flow -- for the individual settings autoconfigure
+    doesn't cover (or covers as a side effect you want to override by
+    hand). Mirrors `ovos-config get -k <path>` (see that CLI's own
+    --help), but with a STRICT path only, not that command's own fuzzy
+    "search for keys containing this text" mode -- fine for a human at
+    a terminal picking from a prompted list, wrong for a programmatic
+    caller (ha-ovos-integration) that needs one deterministic answer,
+    not a list to disambiguate.
+
+    No key at all returns the full shared config, same as `ovos-config
+    show`'s own joined-table default.
+    """
+    config = _read_shared_config()
+    if key is None:
+        return config
+    try:
+        return {"key": key, "value": _get_by_path(config, key)}
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"No such config key: '{key}'")
+
+
+@app.put("/config")
+def set_config(req: ConfigSetRequest):
+    """The write-side counterpart to GET /config above. Writes directly
+    to the shared mycroft.conf rather than shelling out to `ovos-config
+    set` -- that command's own fuzzy key matching and interactive
+    value-type prompting are built for a human at a terminal, not a
+    predictable API a caller can rely on; a direct, atomic JSON write
+    with a value the caller already gave as a real JSON type (bool/
+    number/string/list/object, no string-parsing ambiguity) is more
+    reliable here, same reasoning _set_by_path's own docstring covers.
+
+    Does NOT restart anything -- most OVOS services read Configuration()
+    once at startup and don't hot-reload it (confirmed already for
+    logs.path elsewhere in this project: a restart was needed for that
+    to take effect). This endpoint can't know which add-on(s), if any,
+    need restarting for an arbitrary key, so it always says so rather
+    than guessing right for some keys and silently wrong for others.
+    """
+    config = _read_shared_config()
+    try:
+        _set_by_path(config, req.key, req.value)
+    except TypeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    _write_shared_config(config)
+    return {
+        "status": "ok",
+        "key": req.key,
+        "value": req.value,
+        "note": "Restart the relevant add-on(s) for this to take effect -- most OVOS services read this once at startup.",
+    }
 
 
 def _ask_sync(utterance: str, lang: str) -> dict | None:
