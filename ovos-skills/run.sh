@@ -1,6 +1,20 @@
 #!/usr/bin/with-contenv bashio
 LOGLEVEL=$(bashio::config 'log_level')
 
+# Optional opt-in override for the ovos-workshop version installed into
+# EVERY skill's own venv (see BASELINE_PACKAGES in api.py) -- empty by
+# default, meaning "whatever pip resolves normally" (the latest stable
+# release, never a pre-release unless explicitly named). Exists because
+# a real, confirmed upstream bug (OpenVoiceOS/ovos-workshop#559 -- Adapt
+# vocab from .voc files never matching .require()'d intents) is fixed
+# only in an alpha release (9.2.10a1+) as of this writing, with no
+# stable release carrying the fix yet. Raised and agreed directly: this
+# project stays on stable by default, deliberately -- switching the
+# whole stack to alpha isn't the answer for one library's one fix, so
+# this is an explicit, single-add-on, opt-in choice instead (e.g. set
+# to ">=9.2.10a1" to pick it up), not a default anyone gets silently.
+export OVOS_WORKSHOP_VERSION=$(bashio::config 'ovos_workshop_version')
+
 # Shared config, same convention as haos-ovos-addons. This add-on no
 # longer talks to ovos-core's own SkillsStore/messagebus at all (see
 # api.py's module docstring -- confirmed unreliable for both install

@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.0.9 (2026-08-30)
+- Add optional `ovos_workshop_version` setting -- same mechanism and reasoning as OVOS Skills' own DOCS.md entry (OpenVoiceOS/ovos-workshop#559).
+
 ## 0.0.8 (2026-08-30)
 - read skill.json for a nicer display name
 

@@ -153,6 +153,17 @@ def _pip_installable(source: str) -> str:
 # stricter requirement -- this is just a better default starting point
 # within that same isolated venv, not a shared, forced version.
 BASELINE_PACKAGES = ["ovos-workshop", "ovos-plugin-manager", "setuptools<=80.9.0"]
+# Optional opt-in override for the bare "ovos-workshop" entry above --
+# see run.sh's own comment for the full reasoning
+# (OpenVoiceOS/ovos-workshop#559, a real, confirmed bug fixed only in
+# an alpha release as of this writing, deliberately not switched to by
+# default). bashio::config returns the literal string "null" (not an
+# empty string) for an unset str? option -- confirmed already,
+# elsewhere in this project -- so that's checked explicitly, not just
+# emptiness.
+_ovos_workshop_version = os.environ.get("OVOS_WORKSHOP_VERSION", "").strip()
+if _ovos_workshop_version and _ovos_workshop_version != "null":
+    BASELINE_PACKAGES[0] = f"ovos-workshop{_ovos_workshop_version}" if _ovos_workshop_version[0] in "<>=!~" else f"ovos-workshop=={_ovos_workshop_version}"
 # setuptools added after a third, same-class failure confirmed for
 # real: ovos_plugin_manager's own code does "import pkg_resources"
 # internally, which newer setuptools versions no longer bundle by

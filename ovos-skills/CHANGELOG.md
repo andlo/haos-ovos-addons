@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.0.37 (2026-08-30)
+- Add optional `ovos_workshop_version` setting to opt into a newer `ovos-workshop` for every skill's own venv -- see DOCS.md's "Opting into a newer ovos-workshop" for why (OpenVoiceOS/ovos-workshop#559, fixed only in an alpha release, this stays on stable by default).
+
 ## 0.3.3 (2026-08-05)
 - Remove skill-ovos-news from usable catalog entries -- confirmed genuinely non-functional in this architecture, same category as ovos-skill-volume/-naptime but a different missing dependency.
 

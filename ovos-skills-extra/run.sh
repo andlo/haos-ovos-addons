@@ -1,6 +1,12 @@
 #!/usr/bin/with-contenv bashio
 LOGLEVEL=$(bashio::config 'log_level')
 
+# Same opt-in ovos-workshop version override as ovos-skills' own run.sh
+# -- see that file's own comment for the full reasoning
+# (OpenVoiceOS/ovos-workshop#559, fixed in alpha 9.2.10a1+, not yet in
+# any stable release, deliberately not a default anyone gets silently).
+export OVOS_WORKSHOP_VERSION=$(bashio::config 'ovos_workshop_version')
+
 # Shared config, same convention as the other add-ons. This add-on
 # never talks to ovos-core's own messagebus/SkillsStore either (same
 # reasoning as ovos-skills) -- settings.json for every skill still

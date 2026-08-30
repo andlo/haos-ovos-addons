@@ -36,6 +36,7 @@ This add-on has no catalog of its own, by design (see this file's own top -- ins
 | Option | Description |
 |---|---|
 | `log_level` | `debug`, `info`, `warning`, or `error` |
+| `ovos_workshop_version` | Empty by default (whatever pip resolves normally -- the latest stable release). Set a version constraint (e.g. `>=9.2.10a1`, or a bare `9.2.10a1` to pin exactly) to override the `ovos-workshop` version installed into every skill's own venv. See `ovos-skills`' own DOCS.md's "Opting into a newer ovos-workshop" -- same mechanism, same reasoning ([OpenVoiceOS/ovos-workshop#559](https://github.com/OpenVoiceOS/ovos-workshop/issues/559)), same default (empty, unaffected). |
 
 ## Baseline packages
 

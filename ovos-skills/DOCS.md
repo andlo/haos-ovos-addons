@@ -75,6 +75,15 @@ Every skill in this add-on's own catalog already has a name (see the table above
 | Option | Description |
 |---|---|
 | `log_level` | `debug`, `info`, `warning`, or `error` |
+| `ovos_workshop_version` | Empty by default (whatever pip resolves normally -- the latest stable release). Set a version constraint (e.g. `>=9.2.10a1`, or a bare `9.2.10a1` to pin exactly) to override the `ovos-workshop` version installed into every skill's own venv. See "Opting into a newer ovos-workshop" below. |
+
+## Opting into a newer ovos-workshop
+
+`ovos-workshop`'s own stable releases don't yet include the fix for a real, confirmed bug ([OpenVoiceOS/ovos-workshop#559](https://github.com/OpenVoiceOS/ovos-workshop/issues/559) -- Adapt vocab from `.voc` files silently never matching a skill's own `.require()`'d intents, due to a capitalization mismatch between two of that library's own internal code paths). Fixed upstream in alpha `9.2.10a1` (2026-07-24) and every alpha since; no stable release carries it yet as of this writing.
+
+This project stays on the stable channel deliberately (see `ovos-core/DOCS.md`'s own "Intent pipeline" section for the padatious-vs-padacioso reasoning that led to that decision) -- switching the whole stack to alpha for one library's one fix isn't the right trade. `ovos_workshop_version` is the explicit, opt-in alternative: set it and only `ovos-workshop` (and whatever alpha-compatible versions of its own dependencies pip resolves alongside it -- confirmed pulling in `ovos-plugin-manager`, `ovos-config`, `ovos_bus_client`, `ovos-utils`, `padacioso`, and `ovos-spec-tools` as alphas too, when tested) moves, contained entirely within each skill's own isolated venv. Nothing else on the stack is affected, and leaving this empty (the default) changes nothing.
+
+Confirmed working directly: `pip install "ovos-workshop>=9.2.10a1"` installs real alpha releases without needing pip's own `--pre` flag, since naming a pre-release version explicitly in the constraint is enough on its own.
 
 ## Baseline packages
 
