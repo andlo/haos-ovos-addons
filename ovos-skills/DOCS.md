@@ -43,7 +43,7 @@ Stop is kept visible, not deleted, so the gap is easy to revisit if a working re
 |---|---|
 | `GET /health` | `{"bus_connected": true}` |
 | `GET /catalog` | This add-on's own curated skill list, as `{"items": [...]}` |
-| `GET /skills` | Installed skills: `{"skills": [{"skill_id", "package_name", "source", "version", "active"}, ...]}` |
+| `GET /skills` | Installed skills: `{"skills": [{"skill_id", "package_name", "source", "version", "active", "name"}, ...]}`. `name` is `null` unless the skill ships its own `skill.json` (see "Display names" below). |
 | `GET /skills/running` | Per-skill process status (running/dead, PID, restart count) |
 | `POST /skills/install` | Body `{"url": "<source>"}`. Async — returns `{"status": "pending", "poll": "..."}` |
 | `GET /skills/install/status?key=<url or skill_id>` | Poll for the real result; success includes the confirmed-real `skill_id` |
@@ -63,6 +63,12 @@ There's no bus message to ask a running skill its own state back, so `GET /skill
 Installing prefers a real, published PyPI release over the catalog's git source when one exists — more stable than whatever's on a repo's default branch.
 
 Individual catalog entries can also declare an optional `extra_deps` list — packages installed into that specific skill's own venv only, on top of the shared baseline below. Used for `ovos-skill-wikipedia` (`ovos-translate-plugin-server`, confirmed 0.0.33, see issue #10) rather than adding it to every skill's venv unnecessarily.
+
+## Display names
+
+Every skill in this add-on's own catalog already has a name (see the table above), so `GET /skills`' own `name` field is mostly redundant here — a skill installed some other way (directly against this API, bypassing the catalog) has no catalog entry to fall back on, so this reads the skill's own `skill.json` instead: a per-locale metadata file (`name`/`description`/`examples`/`tags`/`icon`) many modern OVOS skills ship under `<package>/locale/<lang>/skill.json`. Confirmed present for real on a real skill during development, with `"name": "Wiki Offline"`.
+
+`null` when no `skill.json` exists anywhere in the installed package — plenty of skills genuinely don't ship one. Callers (`ha-ovos-integration`'s own device/subentry naming) already have their own last-resort fallback for that case.
 
 ## Configuration
 

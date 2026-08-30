@@ -527,6 +527,51 @@ def running_skills():
     return skill_procs.status()
 
 
+def _read_skill_display_name(venv_dir: str, package_name: str) -> str | None:
+    """Best-effort nicer display name for a skill, read directly from
+    its own skill.json -- a per-locale metadata file (name/description/
+    examples/tags/icon) many modern OVOS skills ship under their own
+    locale/<lang>/skill.json, confirmed present for real during
+    development (ovos-skill-wiki-offline.andlo's own installed files
+    have exactly this, with "name": "Wiki Offline"). This add-on has no
+    catalog of its own (see list_installed_skills's own docstring for
+    why) and a skill installed here often has no settingsmeta either,
+    so this is the one remaining real source of a nicer name than the
+    raw skill_id -- confirmed by direct investigation, not assumed.
+
+    Returns None (not the raw skill_id) when no skill.json exists
+    anywhere -- callers already have their own prettify_skill_id-style
+    fallback for that case; this function's only job is trying the one
+    real data source, not deciding the final fallback chain.
+
+    Tries the installed package's own expected import-name directory
+    first (package_name with dashes as underscores, the normal
+    setuptools convention), then falls back to a broader glob in case
+    a skill's own import name doesn't follow that convention -- en-us
+    preferred (this API's own other text is already English), any
+    other locale's copy used if that's all that exists rather than
+    showing nothing.
+    """
+    import glob
+    site_packages_dirs = glob.glob(os.path.join(venv_dir, "lib", "python*", "site-packages"))
+    if not site_packages_dirs:
+        return None
+    site_packages = site_packages_dirs[0]
+    expected_pkg_dir = package_name.replace("-", "_")
+    candidates = [os.path.join(site_packages, expected_pkg_dir, "locale", "en-us", "skill.json")]
+    candidates += glob.glob(os.path.join(site_packages, "*", "locale", "en-us", "skill.json"))
+    candidates += glob.glob(os.path.join(site_packages, "*", "locale", "*", "skill.json"))
+    for path in candidates:
+        try:
+            with open(path, encoding="utf-8") as f:
+                name = json.load(f).get("name")
+            if name and name.strip():
+                return name.strip()
+        except (OSError, json.JSONDecodeError):
+            continue
+    return None
+
+
 @app.get("/skills")
 def list_installed_skills():
     manifest = _read_manifest()
@@ -538,6 +583,7 @@ def list_installed_skills():
             "package_name": entry["package_name"],
             "source": entry["source"],
             "version": version,
+            "name": _read_skill_display_name(_venv_dir(skill_id), entry["package_name"]),
         })
     return {"skills": skills}
 

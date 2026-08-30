@@ -966,6 +966,47 @@ def get_catalog():
     return {"items": _read_catalog()}
 
 
+def _read_skill_display_name(venv_dir: str, package_name: str) -> str | None:
+    """Best-effort nicer display name for a skill that isn't in this
+    add-on's own curated catalog (fetch_catalog_names on the ha-ovos-
+    integration side already prefers the catalog when a skill IS
+    there) -- read directly from the skill's own skill.json, a per-
+    locale metadata file (name/description/examples/tags/icon) many
+    modern OVOS skills ship under their own locale/<lang>/skill.json.
+    Confirmed present for real during development on a skill installed
+    the same way via ovos-skills-extra (ovos-skill-wiki-offline.andlo's
+    own installed files have exactly this, with "name": "Wiki Offline").
+
+    Returns None (not the raw skill_id) when no skill.json exists --
+    callers already have their own prettify_skill_id-style fallback for
+    that case.
+
+    Tries the installed package's own expected import-name directory
+    first (package_name with dashes as underscores, the normal
+    setuptools convention), then falls back to a broader glob in case a
+    skill's own import name doesn't follow that convention -- en-us
+    preferred, any other locale's copy used if that's all that exists.
+    """
+    import glob
+    site_packages_dirs = glob.glob(os.path.join(venv_dir, "lib", "python*", "site-packages"))
+    if not site_packages_dirs:
+        return None
+    site_packages = site_packages_dirs[0]
+    expected_pkg_dir = package_name.replace("-", "_")
+    candidates = [os.path.join(site_packages, expected_pkg_dir, "locale", "en-us", "skill.json")]
+    candidates += glob.glob(os.path.join(site_packages, "*", "locale", "en-us", "skill.json"))
+    candidates += glob.glob(os.path.join(site_packages, "*", "locale", "*", "skill.json"))
+    for path in candidates:
+        try:
+            with open(path, encoding="utf-8") as f:
+                name = json.load(f).get("name")
+            if name and name.strip():
+                return name.strip()
+        except (OSError, json.JSONDecodeError):
+            continue
+    return None
+
+
 @app.get("/skills")
 def list_installed_skills():
     """Straight from the manifest -- the source of truth for what's
@@ -984,6 +1025,7 @@ def list_installed_skills():
             "source": entry["source"],
             "version": version,
             "active": _is_skill_active(skill_id),
+            "name": _read_skill_display_name(_venv_dir(skill_id), entry["package_name"]),
         })
     return {"skills": skills}
 

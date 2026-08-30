@@ -17,13 +17,19 @@ Install and start the add-on. Add skills from Home Assistant, via `ha-ovos-integ
 | Endpoint | What it does |
 |---|---|
 | `GET /health` | `{"bus_connected": true}` |
-| `GET /skills` | Installed skills, from this add-on's own manifest |
+| `GET /skills` | Installed skills, from this add-on's own manifest, plus a best-effort `name` (see "Display names" below) |
 | `GET /skills/running` | Per-skill process status |
 | `POST /skills/install` | Body `{"url": "<pypi-name-or-git-url>"}`. Async — returns `{"status": "pending", "poll": "..."}` |
 | `GET /skills/install/status?key=<url or skill_id>` | Poll for the real result |
 | `DELETE /skills/{skill_id}` | Uninstall — removes the skill's own venv |
 | `GET /skills/{skill_id}/settingsmeta` | The skill's settings schema, if it ships one |
 | `GET`/`PUT /skills/{skill_id}/settings` | Read/write the skill's own `settings.json` |
+
+## Display names
+
+This add-on has no catalog of its own, by design (see this file's own top -- install by typing a PyPI name or git URL directly, nothing curated). A skill installed here has nothing better than its raw `skill_id` to go by, UNLESS it ships its own `skill.json`: a per-locale metadata file (`name`/`description`/`examples`/`tags`/`icon`) many modern OVOS skills carry under `<package>/locale/<lang>/skill.json`. `GET /skills`' own `name` field reads this directly when present — confirmed for real during development on two different real skills installed exactly this way (one from a PyPI name, one from a git URL), both correctly returning their own real name (`"Wiki Offline"`, `"ChatGPT Fallback Skill"`).
+
+`null` when no `skill.json` exists anywhere in the installed package. Callers (`ha-ovos-integration`'s own device/subentry naming) already have their own last-resort fallback (a crude cleanup of the raw `skill_id`) for that case.
 
 ## Configuration
 
