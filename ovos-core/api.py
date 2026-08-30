@@ -223,6 +223,24 @@ class ConfigSetRequest(BaseModel):
     value: object
 
 
+def _read_joined_config() -> dict:
+    """The FULL EFFECTIVE config (user overrides merged over ovos-config's
+    own baked-in defaults), not just whatever's explicitly written to the
+    shared mycroft.conf -- confirmed by testing directly: date_format,
+    time_format, temperature_unit etc. were never once written to our
+    own shared file (nothing in this project ever set them), yet
+    Configuration() correctly reports their real, in-effect default
+    values ("MDY", "half", "celsius"), while a raw read of the shared
+    file alone would show nothing for these keys at all. GET /config
+    below is meant to answer "what is this actually set to right now",
+    which requires this distinction -- ovos-config itself makes the same
+    one, joining "user > system > remote > default" (its own `show`
+    --help says so directly).
+    """
+    from ovos_config import Configuration
+    return dict(Configuration())
+
+
 @app.get("/config")
 def get_config(key: str | None = None):
     """Generic escape hatch alongside /autoconfigure's own curated,
@@ -235,10 +253,16 @@ def get_config(key: str | None = None):
     caller (ha-ovos-integration) that needs one deterministic answer,
     not a list to disambiguate.
 
-    No key at all returns the full shared config, same as `ovos-config
-    show`'s own joined-table default.
+    Reads the full JOINED config (see _read_joined_config's own
+    docstring) -- shows real in-effect values, including ones never
+    explicitly written to the shared file, not just explicit overrides.
+
+    No key at all returns the full joined config, same as `ovos-config
+    show`'s own default (this project's closest equivalent to a full
+    schema dump, since ovos-config itself has no --json output mode --
+    confirmed via its own --help).
     """
-    config = _read_shared_config()
+    config = _read_joined_config()
     if key is None:
         return config
     try:
